@@ -208,7 +208,17 @@ elif menu == "Add Student":
 
         st.success("Student Added Successfully.")
 
+st.divider()
 
+st.subheader("🎓 Student Management")
+
+if st.button(
+    "👨‍🎓 Student Registration Approvals",
+    use_container_width=True
+):
+    st.switch_page("pages/student_approvals.py")
+
+    
 # ==========================================================
 # ADD FACULTY
 # ==========================================================

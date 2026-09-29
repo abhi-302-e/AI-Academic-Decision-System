@@ -255,16 +255,15 @@ def verify_email_otp(student_id, email, otp):
     )
 
     cursor.execute(
-        """
-        UPDATE students
-        SET email_verified = 1
-        WHERE student_id = ?
-        """,
-        (
-            student_id,
-        )
-    )
-
+    """
+    UPDATE students
+    SET
+        email_verified = 1,
+        account_status = 'Pending Approval'
+    WHERE student_id = ?
+    """,
+    (student_id,)
+)
     connection.commit()
 
     connection.close()
@@ -3559,6 +3558,317 @@ def search_students(keyword):
     connection.close()
 
     return students
+
+# =========================================================
+# STUDENT APPROVAL SYSTEM
+# =========================================================
+
+def upgrade_student_approval_system():
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        cursor.execute("PRAGMA table_info(students)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        new_columns = {
+            "approved_by": "TEXT",
+            "approved_at": "TIMESTAMP",
+            "rejection_reason": "TEXT"
+        }
+
+        for column, data_type in new_columns.items():
+
+            if column not in columns:
+
+                cursor.execute(
+                    f"ALTER TABLE students ADD COLUMN {column} {data_type}"
+                )
+
+                print(f"Added student approval column: {column}")
+
+        connection.commit()
+
+        print("Student approval system upgrade completed.")
+
+    except Exception as error:
+
+        connection.rollback()
+        print(f"Student approval upgrade error: {error}")
+
+    finally:
+
+        connection.close()
+
+if __name__ == "__main__":
+    initialize_database()
+    upgrade_student_registration_system()
+    upgrade_student_approval_system()
+
+# =========================================================
+# GET PENDING STUDENT APPLICATIONS
+# =========================================================
+
+def get_pending_student_applications():
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT
+            student_id,
+            enrollment_no,
+            full_name,
+            date_of_birth,
+            gender,
+            father_name,
+            mother_name,
+            address,
+            department,
+            admission_year,
+            admission_session,
+            email,
+            phone,
+            email_verified,
+            account_status,
+            created_at
+        FROM students
+        WHERE account_status = 'Pending Approval'
+        AND email_verified = 1
+        ORDER BY student_id DESC
+    """)
+
+    students = cursor.fetchall()
+
+    connection.close()
+
+    return students
+
+
+# =========================================================
+# APPROVE STUDENT
+# =========================================================
+
+def approve_student(student_id, approved_by="Admin"):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        cursor.execute("""
+            UPDATE students
+            SET
+                account_status = 'Active',
+                approved_by = ?,
+                approved_at = CURRENT_TIMESTAMP,
+                rejection_reason = NULL
+            WHERE student_id = ?
+            AND email_verified = 1
+            AND account_status = 'Pending Approval'
+        """, (
+            approved_by,
+            student_id
+        ))
+
+        connection.commit()
+
+        return cursor.rowcount > 0
+
+    except Exception as error:
+
+        connection.rollback()
+
+        print(
+            f"Student approval error: {error}"
+        )
+
+        return False
+
+    finally:
+
+        connection.close()
+
+
+# =========================================================
+# REJECT STUDENT
+# =========================================================
+
+def reject_student(
+    student_id,
+    reason="",
+    rejected_by="Admin"
+):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        cursor.execute("""
+            UPDATE students
+            SET
+                account_status = 'Rejected',
+                approved_by = ?,
+                approved_at = CURRENT_TIMESTAMP,
+                rejection_reason = ?
+            WHERE student_id = ?
+            AND email_verified = 1
+            AND account_status = 'Pending Approval'
+        """, (
+            rejected_by,
+            reason,
+            student_id
+        ))
+
+        connection.commit()
+
+        return cursor.rowcount > 0
+
+    except Exception as error:
+
+        connection.rollback()
+
+        print(
+            f"Student rejection error: {error}"
+        )
+
+        return False
+
+    finally:
+
+        connection.close()
+# =========================================================
+# GET PENDING STUDENT APPLICATIONS
+# =========================================================
+
+def get_pending_student_applications():
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT
+            student_id,
+            enrollment_no,
+            full_name,
+            date_of_birth,
+            gender,
+            father_name,
+            mother_name,
+            address,
+            department,
+            admission_year,
+            admission_session,
+            email,
+            phone,
+            email_verified,
+            account_status,
+            created_at
+        FROM students
+        WHERE account_status = 'Pending Approval'
+        AND email_verified = 1
+        ORDER BY student_id DESC
+    """)
+
+    students = cursor.fetchall()
+
+    connection.close()
+
+    return students
+
+
+# =========================================================
+# APPROVE STUDENT
+# =========================================================
+
+def approve_student(student_id, approved_by="Admin"):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        cursor.execute("""
+            UPDATE students
+            SET
+                account_status = 'Active',
+                approved_by = ?,
+                approved_at = CURRENT_TIMESTAMP,
+                rejection_reason = NULL
+            WHERE student_id = ?
+            AND email_verified = 1
+            AND account_status = 'Pending Approval'
+        """, (
+            approved_by,
+            student_id
+        ))
+
+        connection.commit()
+
+        success = cursor.rowcount > 0
+
+        return success
+
+    except Exception as error:
+
+        connection.rollback()
+        print(f"Student approval error: {error}")
+
+        return False
+
+    finally:
+
+        connection.close()
+
+
+# =========================================================
+# REJECT STUDENT
+# =========================================================
+
+def reject_student(student_id, reason="", rejected_by="Admin"):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        cursor.execute("""
+            UPDATE students
+            SET
+                account_status = 'Rejected',
+                approved_by = ?,
+                approved_at = CURRENT_TIMESTAMP,
+                rejection_reason = ?
+            WHERE student_id = ?
+            AND email_verified = 1
+            AND account_status = 'Pending Approval'
+        """, (
+            rejected_by,
+            reason,
+            student_id
+        ))
+
+        connection.commit()
+
+        success = cursor.rowcount > 0
+
+        return success
+
+    except Exception as error:
+
+        connection.rollback()
+        print(f"Student rejection error: {error}")
+
+        return False
+
+    finally:
+
+        connection.close()
+
+
 # ==========================================================
 # GET STUDENT REGISTERED COURSES
 # ==========================================================
@@ -3639,6 +3949,9 @@ def reset_database():
     connection.commit()
 
     connection.close()
+
+
+
 
 
 # ===========================================================
