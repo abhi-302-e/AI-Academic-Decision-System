@@ -12,12 +12,6 @@ import pandas as pd
 from auth import require_admin
 from database import get_all_students
 
-st.set_page_config(
-    page_title="Analytics",
-    page_icon="📊",
-    layout="wide"
-)
-
 require_admin()
 
 st.title("📊 Academic Analytics")
@@ -35,17 +29,16 @@ else:
         len(students)
     )
 
+    average_cgpa = students["cgpa"].mean()
+    average_attendance = students["attendance_percentage"].mean()
     st.metric(
         "Average CGPA",
-        round(students["cgpa"].mean(), 2)
+        round(average_cgpa, 2) if pd.notna(average_cgpa) else "Not recorded"
     )
 
     st.metric(
         "Average Attendance",
-        round(
-            students["attendance_percentage"].mean(),
-            2
-        )
+        round(average_attendance, 2) if pd.notna(average_attendance) else "Not recorded"
     )
 
     st.subheader("Department Wise Students")

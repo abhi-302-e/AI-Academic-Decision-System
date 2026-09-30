@@ -28,12 +28,6 @@ from database import (
 # PAGE CONFIG
 # =========================================================
 
-st.set_page_config(
-    page_title="Student Approvals",
-    page_icon="👨‍🎓",
-    layout="wide"
-)
-
 
 # =========================================================
 # ADMIN SECURITY
@@ -44,7 +38,7 @@ if "user" not in st.session_state:
     st.error("Please login first.")
 
     if st.button("Go to Login"):
-        st.switch_page("pages/login.py")
+        st.switch_page("dashboard/login.py")
 
     st.stop()
 
@@ -52,8 +46,7 @@ if "user" not in st.session_state:
 if st.session_state.get("role") != "Admin":
 
     st.error(
-        "Access denied. Only administrators can access "
-        "Student Approval."
+        "Access denied. Only administrators can access Student Approvals."
     )
 
     st.stop()
@@ -65,10 +58,7 @@ if st.session_state.get("role") != "Admin":
 
 st.title("👨‍🎓 Student Registration Approval")
 
-st.write(
-    "Review students who have completed Gmail verification "
-    "and are waiting for administrative approval."
-)
+st.write("Review new student registrations and approve or reject applications.")
 
 st.divider()
 
@@ -93,16 +83,40 @@ with col1:
     )
 
 with col2:
-    st.metric(
-        "Gmail Verified",
-        len(students)
-    )
+    st.metric("Ready for Review", len(students))
 
 with col3:
     st.metric(
         "Action Required",
         len(students)
     )
+
+if students:
+    confirm_bulk_approval = st.checkbox(
+        f"I reviewed all {len(students)} pending student applications",
+        key="confirm_student_approval_page_bulk"
+    )
+    if st.button(
+        "Approve all pending students",
+        type="primary",
+        disabled=not confirm_bulk_approval,
+        use_container_width=True
+    ):
+        admin_user = dict(
+            st.session_state.get("user")
+            or st.session_state.get("user_data")
+            or {}
+        )
+        approved_by = admin_user.get(
+            "username",
+            admin_user.get("email", "Admin")
+        )
+        approved_count = sum(
+            approve_student(student["student_id"], approved_by)
+            for student in students
+        )
+        st.success(f"Approved {approved_count} of {len(students)} pending student registrations.")
+        st.rerun()
 
 
 st.divider()
@@ -118,10 +132,7 @@ if not students:
         "🎉 No pending student applications."
     )
 
-    st.info(
-        "New students will appear here after they "
-        "successfully verify their Gmail."
-    )
+    st.info("New student registrations will appear here for review.")
 
     st.stop()
 
@@ -207,10 +218,6 @@ for student in students:
                 f"{student['phone']}"
             )
 
-            st.write(
-                "**Gmail Verification:** ✅ Verified"
-            )
-
         st.write(
             f"**Address:** {student['address']}"
         )
@@ -241,10 +248,7 @@ for student in students:
                 use_container_width=True
             ):
 
-                admin_user = st.session_state.get(
-                    "user",
-                    {}
-                )
+                admin_user = dict(st.session_state.get("user") or {})
 
                 approved_by = admin_user.get(
                     "username",
@@ -293,10 +297,7 @@ for student in students:
 
                 else:
 
-                    admin_user = st.session_state.get(
-                        "user",
-                        {}
-                    )
+                    admin_user = dict(st.session_state.get("user") or {})
 
                     rejected_by = admin_user.get(
                         "username",
@@ -334,7 +335,4 @@ for student in students:
 st.divider()
 
 if st.button("← Back to Admin Dashboard"):
-
-    st.switch_page(
-        "pages/admin_dashboard.py"
-    )
+    st.switch_page("dashboard/admin_dashboard.py")

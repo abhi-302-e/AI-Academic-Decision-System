@@ -7,3 +7,4 @@ Faker
 bcrypt
 openpyxl
 matplotlib
+twilio

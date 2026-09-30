@@ -145,131 +145,6 @@ def import_timetable_from_excel(file_path):
 
 
 
-# ==========================================================
-# EMAIL VERIFICATION / OTP
-# ==========================================================
-
-from datetime import datetime, timedelta
-
-
-def create_email_verification(student_id, email, otp, expiry_minutes=10):
-    """
-    Store an email verification OTP for a student.
-    """
-
-    connection = get_connection()
-    cursor = connection.cursor()
-
-    expires_at = datetime.now() + timedelta(
-        minutes=expiry_minutes
-    )
-
-    cursor.execute(
-        """
-        INSERT INTO email_verifications
-        (
-            student_id,
-            email,
-            otp,
-            expires_at,
-            verified
-        )
-        VALUES (?, ?, ?, ?, 0)
-        """,
-        (
-            student_id,
-            email,
-            otp,
-            expires_at
-        )
-    )
-
-    connection.commit()
-
-    verification_id = cursor.lastrowid
-
-    connection.close()
-
-    return verification_id
-
-
-def verify_email_otp(student_id, email, otp):
-    """
-    Verify the latest OTP sent to the student's email.
-    """
-
-    connection = get_connection()
-    cursor = connection.cursor()
-
-    cursor.execute(
-        """
-        SELECT *
-        FROM email_verifications
-        WHERE student_id = ?
-        AND email = ?
-        AND verified = 0
-        ORDER BY verification_id DESC
-        LIMIT 1
-        """,
-        (
-            student_id,
-            email
-        )
-    )
-
-    verification = cursor.fetchone()
-
-    if verification is None:
-        connection.close()
-        return False
-
-    expires_at = verification["expires_at"]
-
-    # SQLite may return the timestamp as text
-    if isinstance(expires_at, str):
-        try:
-            expires_at = datetime.fromisoformat(
-                expires_at
-            )
-        except ValueError:
-            connection.close()
-            return False
-
-    if datetime.now() > expires_at:
-        connection.close()
-        return False
-
-    if str(verification["otp"]) != str(otp).strip():
-        connection.close()
-        return False
-
-    cursor.execute(
-        """
-        UPDATE email_verifications
-        SET verified = 1
-        WHERE verification_id = ?
-        """,
-        (
-            verification["verification_id"],
-        )
-    )
-
-    cursor.execute(
-    """
-    UPDATE students
-    SET
-        email_verified = 1,
-        account_status = 'Pending Approval'
-    WHERE student_id = ?
-    """,
-    (student_id,)
-)
-    connection.commit()
-
-    connection.close()
-
-    return True
-
 # =======================================================
 # IMPORT COURSES FROM CSV
 # =======================================================
@@ -908,6 +783,10 @@ CREATE TABLE IF NOT EXISTS student_course_mapping (
 
 )
 """)
+
+    connection.commit()
+    connection.close()
+
 # ==========================================================
 # GENERATE STUDENT ENROLLMENT NUMBER
 # ==========================================================
@@ -1077,17 +956,198 @@ def get_student_payments(student_id):
 # SEMESTER REGISTRATION OPERATIONS
 # ==========================================================
 
+SECTION_NAMES = tuple("ABCDEFGHIJ")
+ACADEMIC_DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri")
+ACADEMIC_PERIODS = {
+    "P1": ("09:30 AM", "10:20 AM"),
+    "P2": ("10:20 AM", "11:10 AM"),
+    "P3": ("11:25 AM", "12:15 PM"),
+    "P4": ("12:15 PM", "01:05 PM"),
+    "P6": ("01:45 PM", "02:35 PM"),
+    "P7": ("02:35 PM", "03:25 PM"),
+    "P8": ("03:25 PM", "04:15 PM"),
+}
+
+def _department_key(department):
+    normalized = " ".join(str(department or "").casefold().split())
+    aliases = {
+        "computer science and engineering": "cse",
+        "cse": "cse",
+        "artificial intelligence and machine learning": "aiml",
+        "aiml": "aiml",
+        "cse-aiml": "aiml",
+        "ai and data science": "aids",
+        "ai&ds": "aids",
+        "aids": "aids",
+        "information technology": "it",
+        "it": "it",
+        "electronics and communication engineering": "ece",
+        "ece": "ece",
+        "electrical and electronics engineering": "eee",
+        "eee": "eee",
+        "mechanical engineering": "mechanical",
+        "mechanical": "mechanical",
+        "civil engineering": "civil",
+        "civil": "civil",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def get_published_semester_structures(department, year):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT structure_id, department, year, semester, academic_batch
+        FROM semester_course_structure
+        WHERE year = ? AND is_locked = 1
+        ORDER BY semester, academic_batch DESC
+        """,
+        (year,)
+    ).fetchall()
+    structures = [
+        dict(row)
+        for row in rows
+        if _department_key(row["department"]) == _department_key(department)
+    ]
+    connection.close()
+    return structures
+
+
+def get_courses_for_semester_structure(structure_id):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+         SELECT course_id, COALESCE(catalog_code, course_code) AS course_code,
+             course_name, credits, course_type
+        FROM courses
+        WHERE structure_id = ? AND COALESCE(status, 'Active') = 'Active'
+        ORDER BY COALESCE(catalog_code, course_code)
+        """,
+        (structure_id,)
+    ).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def get_student_registration_for_structure(student_id, structure_id):
+    connection = get_connection()
+    registration = connection.execute(
+        """
+        SELECT *
+        FROM semester_registrations
+        WHERE student_id = ? AND structure_id = ?
+        ORDER BY registration_date DESC
+        LIMIT 1
+        """,
+        (student_id, structure_id)
+    ).fetchone()
+    connection.close()
+    return registration
+
+
+def get_section_capacity(structure_id, capacity=75):
+    connection = get_connection()
+    counts = {
+        row["section"]: row["registered"]
+        for row in connection.execute(
+            """
+            SELECT section, COUNT(*) AS registered
+            FROM semester_registrations
+            WHERE structure_id = ? AND status = 'Registered'
+            GROUP BY section
+            """,
+            (structure_id,)
+        ).fetchall()
+    }
+    connection.close()
+    return [
+        {
+            "section": section,
+            "registered": counts.get(section, 0),
+            "available": max(capacity - counts.get(section, 0), 0),
+        }
+        for section in "ABCDEFGHIJ"
+    ]
+
 def register_student_for_semester(
     student_id,
     structure_id,
     academic_year,
     semester,
-    course_ids
+    course_ids,
+    section
 ):
     connection = get_connection()
 
     try:
         cursor = connection.cursor()
+        connection.execute("BEGIN IMMEDIATE")
+
+        structure = cursor.execute(
+            """
+            SELECT department, year, semester, academic_batch, is_locked
+            FROM semester_course_structure
+            WHERE structure_id = ?
+            """,
+            (structure_id,)
+        ).fetchone()
+        student = cursor.execute(
+            """
+            SELECT department, current_year, account_status
+            FROM students
+            WHERE student_id = ?
+            """,
+            (student_id,)
+        ).fetchone()
+        if (
+            structure is None
+            or student is None
+            or structure["is_locked"] != 1
+            or student["account_status"] != "Active"
+            or int(structure["year"]) != int(student["current_year"])
+            or int(structure["semester"]) != int(semester)
+            or str(structure["academic_batch"]) != str(academic_year)
+            or _department_key(structure["department"])
+                != _department_key(student["department"])
+            or section not in "ABCDEFGHIJ"
+        ):
+            return None
+
+        section_count = cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM semester_registrations
+            WHERE structure_id = ? AND section = ? AND status = 'Registered'
+            """,
+            (structure_id, section)
+        ).fetchone()[0]
+        if section_count >= 75:
+            return None
+
+        fixed_course_ids = {
+            row["course_id"]
+            for row in cursor.execute(
+                """
+                SELECT course_id FROM courses
+                WHERE structure_id = ? AND COALESCE(status, 'Active') = 'Active'
+                """,
+                (structure_id,)
+            ).fetchall()
+        }
+        if not fixed_course_ids or set(course_ids) != fixed_course_ids:
+            return None
+
+        existing_registration = cursor.execute(
+            """
+            SELECT registration_id
+            FROM semester_registrations
+            WHERE student_id = ? AND structure_id = ?
+            LIMIT 1
+            """,
+            (student_id, structure_id)
+        ).fetchone()
+        if existing_registration:
+            return None
 
         # Create semester registration
         cursor.execute("""
@@ -1096,14 +1156,16 @@ def register_student_for_semester(
                 structure_id,
                 academic_year,
                 semester,
+                section,
                 status
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
         """, (
             student_id,
             structure_id,
             academic_year,
             semester,
+            section,
             "Registered"
         ))
 
@@ -1124,6 +1186,11 @@ def register_student_for_semester(
                 course_id
             ))
 
+        cursor.execute(
+            "UPDATE students SET semester = ?, section = ? WHERE student_id = ?",
+            (semester, section, student_id)
+        )
+
         connection.commit()
 
         return registration_id
@@ -1132,6 +1199,410 @@ def register_student_for_semester(
         connection.rollback()
         return None
 
+    finally:
+        connection.close()
+
+
+def get_teachable_course_options(department):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+         SELECT c.course_id, COALESCE(c.catalog_code, c.course_code) AS course_code,
+             c.course_name, c.department,
+               c.year, c.semester, s.academic_batch, c.credits
+        FROM courses c
+        JOIN semester_course_structure s ON s.structure_id = c.structure_id
+        WHERE s.is_locked = 1 AND COALESCE(c.status, 'Active') = 'Active'
+        ORDER BY c.year, c.semester, COALESCE(c.catalog_code, c.course_code)
+        """
+    ).fetchall()
+    connection.close()
+    return [
+        dict(row)
+        for row in rows
+        if _department_key(row["department"]) == _department_key(department)
+    ]
+
+
+def request_faculty_teaching_assignment(
+    faculty_id,
+    course_id,
+    section,
+    day,
+    slot,
+    room_number="",
+):
+    if section not in SECTION_NAMES or day not in ACADEMIC_DAYS or slot not in ACADEMIC_PERIODS:
+        return None
+
+    start_time, end_time = ACADEMIC_PERIODS[slot]
+    connection = get_connection()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        faculty = connection.execute(
+            "SELECT department, status FROM faculty WHERE faculty_id = ?",
+            (faculty_id,)
+        ).fetchone()
+        course = connection.execute(
+            """
+            SELECT c.course_id, c.course_code, c.course_name, c.department,
+                   c.year, c.semester, s.academic_batch
+            FROM courses c
+            JOIN semester_course_structure s ON s.structure_id = c.structure_id
+            WHERE c.course_id = ? AND s.is_locked = 1
+              AND COALESCE(c.status, 'Active') = 'Active'
+            """,
+            (course_id,)
+        ).fetchone()
+        if (
+            faculty is None
+            or faculty["status"] != "Active"
+            or course is None
+            or _department_key(faculty["department"])
+                != _department_key(course["department"])
+        ):
+            return None
+
+        conflict = connection.execute(
+            """
+            SELECT 1 FROM timetable
+            WHERE day = ? AND slot = ? AND (
+                (department = ? AND year = ? AND semester = ? AND section = ?)
+                OR faculty_id = ?
+            )
+            LIMIT 1
+            """,
+            (
+                day,
+                slot,
+                course["department"],
+                course["year"],
+                course["semester"],
+                section,
+                faculty_id,
+            )
+        ).fetchone()
+        if conflict:
+            return None
+
+        pending = connection.execute(
+            """
+            SELECT 1 FROM faculty_teaching_requests
+            WHERE faculty_id = ? AND course_id = ? AND section = ?
+              AND day = ? AND slot = ? AND status = 'Pending'
+            LIMIT 1
+            """,
+            (faculty_id, course_id, section, day, slot)
+        ).fetchone()
+        if pending:
+            return None
+
+        cursor = connection.execute(
+            """
+            INSERT INTO faculty_teaching_requests (
+                faculty_id, course_id, department, year, semester,
+                academic_batch, section, day, slot, start_time, end_time,
+                room_number
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                faculty_id,
+                course_id,
+                course["department"],
+                course["year"],
+                course["semester"],
+                course["academic_batch"],
+                section,
+                day,
+                slot,
+                start_time,
+                end_time,
+                room_number.strip(),
+            )
+        )
+        connection.commit()
+        return cursor.lastrowid
+    except sqlite3.Error:
+        connection.rollback()
+        return None
+    finally:
+        connection.close()
+
+
+def get_pending_faculty_teaching_requests():
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT r.*, f.employee_id, f.full_name AS faculty_name,
+               c.course_code, c.course_name
+        FROM faculty_teaching_requests r
+        JOIN faculty f ON f.faculty_id = r.faculty_id
+        JOIN courses c ON c.course_id = r.course_id
+        WHERE r.status = 'Pending'
+        ORDER BY r.created_at, f.full_name
+        """
+    ).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def approve_faculty_teaching_request(request_id, approved_by):
+    connection = get_connection()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        request = connection.execute(
+            """
+            SELECT * FROM faculty_teaching_requests
+            WHERE request_id = ? AND status = 'Pending'
+            """,
+            (request_id,)
+        ).fetchone()
+        if request is None:
+            return False
+
+        conflict = connection.execute(
+            """
+            SELECT 1 FROM timetable
+            WHERE day = ? AND slot = ? AND (
+                (department = ? AND year = ? AND semester = ? AND section = ?)
+                OR faculty_id = ?
+            )
+            LIMIT 1
+            """,
+            (
+                request["day"],
+                request["slot"],
+                request["department"],
+                request["year"],
+                request["semester"],
+                request["section"],
+                request["faculty_id"],
+            )
+        ).fetchone()
+        if conflict:
+            return False
+
+        course = connection.execute(
+            "SELECT course_code, course_name FROM courses WHERE course_id = ?",
+            (request["course_id"],)
+        ).fetchone()
+        faculty = connection.execute(
+            "SELECT full_name FROM faculty WHERE faculty_id = ?",
+            (request["faculty_id"],)
+        ).fetchone()
+        if course is None or faculty is None:
+            return False
+
+        connection.execute(
+            """
+            INSERT INTO timetable (
+                department, year, semester, section, day, slot,
+                start_time, end_time, course_code, course_name,
+                faculty_name, room_number, course_id, faculty_id,
+                academic_batch
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                request["department"], request["year"], request["semester"],
+                request["section"], request["day"], request["slot"],
+                request["start_time"], request["end_time"],
+                course["course_code"], course["course_name"],
+                faculty["full_name"], request["room_number"],
+                request["course_id"], request["faculty_id"],
+                request["academic_batch"],
+            )
+        )
+        connection.execute(
+            """
+            UPDATE faculty_teaching_requests
+            SET status = 'Approved', reviewed_by = ?
+            WHERE request_id = ?
+            """,
+            (approved_by, request_id)
+        )
+        mapping = connection.execute(
+            """
+            SELECT mapping_id FROM faculty_course_mapping
+            WHERE faculty_id = ? AND course_id = ? AND semester = ?
+            LIMIT 1
+            """,
+            (request["faculty_id"], request["course_id"], request["semester"])
+        ).fetchone()
+        if mapping is None:
+            connection.execute(
+                """
+                INSERT INTO faculty_course_mapping (faculty_id, course_id, semester)
+                VALUES (?, ?, ?)
+                """,
+                (request["faculty_id"], request["course_id"], request["semester"])
+            )
+        connection.commit()
+        return True
+    except sqlite3.Error:
+        connection.rollback()
+        return False
+    finally:
+        connection.close()
+
+
+def reject_faculty_teaching_request(request_id, reviewed_by):
+    connection = get_connection()
+    cursor = connection.execute(
+        """
+        UPDATE faculty_teaching_requests
+        SET status = 'Rejected', reviewed_by = ?
+        WHERE request_id = ? AND status = 'Pending'
+        """,
+        (reviewed_by, request_id)
+    )
+    connection.commit()
+    connection.close()
+    return cursor.rowcount > 0
+
+
+def get_faculty_timetable(faculty_id):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT timetable_id, course_id, course_code, course_name, department,
+               year, semester, academic_batch, section, day, slot,
+               start_time, end_time, room_number
+        FROM timetable
+        WHERE faculty_id = ? AND course_id IS NOT NULL
+        ORDER BY day, slot
+        """,
+        (faculty_id,)
+    ).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def get_session_attendance_roster(timetable_id, faculty_id):
+    connection = get_connection()
+    timetable = connection.execute(
+        """
+        SELECT t.course_id, t.section, c.structure_id
+        FROM timetable t
+        JOIN courses c ON c.course_id = t.course_id
+        WHERE t.timetable_id = ? AND t.faculty_id = ?
+        """,
+        (timetable_id, faculty_id)
+    ).fetchone()
+    if timetable is None:
+        connection.close()
+        return []
+    rows = connection.execute(
+        """
+        SELECT DISTINCT s.student_id, s.roll_number, s.full_name
+        FROM semester_registrations sr
+        JOIN student_registered_courses src
+            ON src.registration_id = sr.registration_id
+        JOIN students s ON s.student_id = sr.student_id
+        WHERE sr.structure_id = ? AND sr.section = ?
+          AND sr.status = 'Registered' AND src.course_id = ?
+        ORDER BY s.roll_number
+        """,
+        (timetable["structure_id"], timetable["section"], timetable["course_id"])
+    ).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def get_recorded_attendance_session(timetable_id, session_date):
+    connection = get_connection()
+    row = connection.execute(
+        """
+        SELECT session_id, created_at
+        FROM attendance_sessions
+        WHERE timetable_id = ? AND session_date = ?
+        """,
+        (timetable_id, session_date)
+    ).fetchone()
+    connection.close()
+    return dict(row) if row else None
+
+
+def submit_session_attendance(timetable_id, faculty_id, session_date, attendance):
+    try:
+        selected_date = datetime.strptime(session_date, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+    connection = get_connection()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        timetable = connection.execute(
+            """
+            SELECT t.course_id, t.section, t.day, c.structure_id
+            FROM timetable t
+            JOIN courses c ON c.course_id = t.course_id
+            WHERE t.timetable_id = ? AND t.faculty_id = ?
+            """,
+            (timetable_id, faculty_id)
+        ).fetchone()
+        if timetable is None or selected_date.strftime("%a") != timetable["day"]:
+            return None
+
+        roster = {
+            row["student_id"]
+            for row in connection.execute(
+                """
+                SELECT DISTINCT s.student_id
+                FROM semester_registrations sr
+                JOIN student_registered_courses src
+                    ON src.registration_id = sr.registration_id
+                JOIN students s ON s.student_id = sr.student_id
+                WHERE sr.structure_id = ? AND sr.section = ?
+                  AND sr.status = 'Registered' AND src.course_id = ?
+                """,
+                (timetable["structure_id"], timetable["section"], timetable["course_id"])
+            ).fetchall()
+        }
+        if not roster or set(attendance) != roster:
+            return None
+
+        cursor = connection.execute(
+            """
+            INSERT INTO attendance_sessions (timetable_id, faculty_id, session_date)
+            VALUES (?, ?, ?)
+            """,
+            (timetable_id, faculty_id, selected_date.isoformat())
+        )
+        session_id = cursor.lastrowid
+        for student_id, is_present in attendance.items():
+            connection.execute(
+                """
+                INSERT INTO attendance_session_records
+                    (session_id, student_id, is_present)
+                VALUES (?, ?, ?)
+                """,
+                (session_id, student_id, int(bool(is_present)))
+            )
+
+        for student_id in roster:
+            totals = connection.execute(
+                """
+                SELECT COUNT(*) AS total, COALESCE(SUM(is_present), 0) AS present
+                FROM attendance_session_records
+                WHERE student_id = ?
+                """,
+                (student_id,)
+            ).fetchone()
+            percentage = round(100 * totals["present"] / totals["total"], 2)
+            connection.execute(
+                "UPDATE students SET attendance_percentage = ? WHERE student_id = ?",
+                (percentage, student_id)
+            )
+        connection.commit()
+        return session_id
+    except sqlite3.IntegrityError:
+        connection.rollback()
+        return None
+    except sqlite3.Error:
+        connection.rollback()
+        return None
     finally:
         connection.close()
 
@@ -1365,7 +1836,7 @@ if menu == "Update Faculty":
 
         "SELECT * FROM admin WHERE username=?",
 
-        ("admin",)
+        ("abhishek",)
 
     )
 
@@ -1391,9 +1862,9 @@ if menu == "Update Faculty":
 
         """, (
 
-            "admin",
+            "abhishek",
 
-            hash_password("admin123"),
+            hash_password("abhishek@123"),
 
             "System Administrator",
 
@@ -1401,8 +1872,8 @@ if menu == "Update Faculty":
 
         ))
 
-    connection = get_connection()
-
+    connection.commit()
+    connection.close()
     print("Database Initialized Successfully.")
 
 
@@ -1502,40 +1973,6 @@ def upgrade_student_registration_system():
                 )
 
         # ------------------------------------------------------
-        # EMAIL VERIFICATION TABLE
-        # ------------------------------------------------------
-
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS email_verifications(
-
-            verification_id
-                INTEGER PRIMARY KEY AUTOINCREMENT,
-
-            student_id
-                INTEGER NOT NULL,
-
-            email
-                TEXT NOT NULL,
-
-            otp
-                TEXT NOT NULL,
-
-            expires_at
-                TIMESTAMP NOT NULL,
-
-            verified
-                INTEGER DEFAULT 0,
-
-            created_at
-                TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-            FOREIGN KEY(student_id)
-                REFERENCES students(student_id)
-                ON DELETE CASCADE
-        )
-        """)
-
-        # ------------------------------------------------------
         # ENSURE ENROLLMENT NUMBER COLUMN EXISTS
         # ------------------------------------------------------
 
@@ -1577,6 +2014,12 @@ def upgrade_student_registration_system():
         UPDATE students
         SET account_status = 'Active'
         WHERE account_status IS NULL
+        """)
+
+        cursor.execute("""
+        UPDATE students
+        SET account_status = 'Pending Approval'
+        WHERE account_status = 'Pending Verification'
         """)
 
         connection.commit()
@@ -1836,7 +2279,7 @@ def create_new_student_account(
     - Does NOT register a semester
     - Does NOT assign courses
     - Does NOT process fees
-    - Starts the account as Pending Verification
+    - Starts the account as Pending Approval
     """
 
     connection = get_connection()
@@ -1942,7 +2385,7 @@ def create_new_student_account(
                 phone.strip(),
                 hash_password(password),
                 0,
-                "Pending Verification",
+                "Pending Approval",
                 "Active",
                 admission_session,
                 0.0,
@@ -2094,6 +2537,69 @@ def get_student(student_id):
     connection.close()
 
     return student
+
+
+def _ensure_student_notifications_table(connection):
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS student_notifications (
+            notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_read INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(student_id) REFERENCES students(student_id)
+                ON DELETE CASCADE
+        )
+    """)
+
+
+def create_student_notification(student_id, title, message):
+    connection = get_connection()
+    _ensure_student_notifications_table(connection)
+    cursor = connection.execute(
+        """
+        INSERT INTO student_notifications (student_id, title, message)
+        VALUES (?, ?, ?)
+        """,
+        (student_id, title, message)
+    )
+    connection.commit()
+    notification_id = cursor.lastrowid
+    connection.close()
+    return notification_id
+
+
+def get_student_notifications(student_id, limit=20):
+    connection = get_connection()
+    _ensure_student_notifications_table(connection)
+    notifications = connection.execute(
+        """
+        SELECT notification_id, title, message, created_at, is_read
+        FROM student_notifications
+        WHERE student_id = ?
+        ORDER BY created_at DESC, notification_id DESC
+        LIMIT ?
+        """,
+        (student_id, limit)
+    ).fetchall()
+    connection.close()
+    return [dict(notification) for notification in notifications]
+
+
+def mark_student_notifications_read(student_id):
+    connection = get_connection()
+    _ensure_student_notifications_table(connection)
+    connection.execute(
+        """
+        UPDATE student_notifications
+        SET is_read = 1
+        WHERE student_id = ? AND is_read = 0
+        """,
+        (student_id,)
+    )
+    connection.commit()
+    connection.close()
 
 
 # -----------------------------------------------------------
@@ -2282,7 +2788,7 @@ def add_faculty(
             password
         )
 
-        VALUES(?,?,?,?,?,?,?)
+        VALUES(?,?,?,?,?,?)
         """, (
 
             employee_id,
@@ -2377,7 +2883,17 @@ def get_all_faculty():
 
     cursor.execute("""
 
-    SELECT *
+    SELECT
+        faculty_id,
+        employee_id,
+        full_name,
+        department,
+        email,
+        phone,
+        qualification,
+        experience,
+        designation,
+        status
 
     FROM faculty
 
@@ -2391,6 +2907,402 @@ def get_all_faculty():
     connection.close()
 
     return faculty
+
+
+def _ensure_faculty_course_requests_table(connection):
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS faculty_course_requests (
+            request_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            faculty_id INTEGER NOT NULL,
+            course_code TEXT,
+            course_name TEXT NOT NULL,
+            FOREIGN KEY(faculty_id) REFERENCES faculty(faculty_id)
+                ON DELETE CASCADE
+        )
+    """)
+
+
+def get_active_courses():
+    connection = get_connection()
+    rows = connection.execute(
+        """
+         SELECT course_id, COALESCE(catalog_code, course_code) AS course_code,
+             course_name, department, semester
+        FROM courses
+        WHERE COALESCE(status, 'Active') = 'Active'
+        ORDER BY department, semester, COALESCE(catalog_code, course_code)
+        """
+    ).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def get_default_section_names(department, year, semester):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT DISTINCT section_name
+        FROM sections
+        WHERE department = ? AND year = ? AND semester = ?
+        AND section_name IS NOT NULL
+        ORDER BY section_name
+        """,
+        (department, year, semester)
+    ).fetchall()
+    connection.close()
+    return [row["section_name"] for row in rows]
+
+
+def import_academic_schedule(parsed_schedule):
+    connection = get_connection()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        structure_ids = {}
+        for structure in parsed_schedule["structures"]:
+            existing = connection.execute(
+                """
+                SELECT structure_id FROM semester_course_structure
+                WHERE department = ? AND year = ? AND semester = ?
+                  AND academic_batch = ?
+                """,
+                (
+                    structure["department"],
+                    structure["year"],
+                    structure["semester"],
+                    structure["academic_batch"],
+                )
+            ).fetchone()
+            if existing:
+                structure_id = existing["structure_id"]
+            else:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO semester_course_structure
+                        (department, year, semester, academic_batch, is_locked)
+                    VALUES (?, ?, ?, ?, 0)
+                    """,
+                    (
+                        structure["department"],
+                        structure["year"],
+                        structure["semester"],
+                        structure["academic_batch"],
+                    )
+                )
+                structure_id = cursor.lastrowid
+            structure_ids[(
+                structure["department"],
+                structure["year"],
+                structure["semester"],
+                structure["academic_batch"],
+            )] = structure_id
+
+        course_ids = {}
+        for course in parsed_schedule["courses"]:
+            structure_id = structure_ids[course["structure_key"]]
+            existing = connection.execute(
+                "SELECT course_id FROM courses WHERE course_code = ?",
+                (course["internal_code"],)
+            ).fetchone()
+            if existing:
+                course_id = existing["course_id"]
+                connection.execute(
+                    """
+                    UPDATE courses
+                    SET catalog_code = ?, course_name = ?, department = ?,
+                        year = ?, semester = ?, credits = ?, course_type = ?,
+                        status = 'Active', structure_id = ?, is_locked = 1
+                    WHERE course_id = ?
+                    """,
+                    (
+                        course["catalog_code"], course["course_name"],
+                        course["department"], course["year"], course["semester"],
+                        course["credits"], course["course_type"], structure_id,
+                        course_id,
+                    )
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO courses (
+                        course_code, catalog_code, course_name, department,
+                        year, semester, credits, course_type, status,
+                        structure_id, is_locked
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?, 1)
+                    """,
+                    (
+                        course["internal_code"], course["catalog_code"],
+                        course["course_name"], course["department"],
+                        course["year"], course["semester"], course["credits"],
+                        course["course_type"], structure_id,
+                    )
+                )
+                course_id = cursor.lastrowid
+            course_ids[course["internal_code"]] = course_id
+
+        sections_added = 0
+        for section in parsed_schedule["sections"]:
+            existing = connection.execute(
+                """
+                SELECT section_id FROM sections
+                WHERE department = ? AND year = ? AND semester = ?
+                  AND section_name = ?
+                LIMIT 1
+                """,
+                (
+                    section["department"], section["year"], section["semester"],
+                    section["section_name"],
+                )
+            ).fetchone()
+            if existing is None:
+                connection.execute(
+                    """
+                    INSERT INTO sections
+                        (department, year, semester, section_name, room_number)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        section["department"], section["year"], section["semester"],
+                        section["section_name"], section["room_number"],
+                    )
+                )
+                sections_added += 1
+
+        timetable_added = 0
+        timetable_skipped = 0
+        for entry in parsed_schedule["timetable"]:
+            course_id = course_ids[entry["internal_course_code"]]
+            structure_id = structure_ids[(
+                entry["department"], entry["year"], entry["semester"],
+                entry["academic_batch"],
+            )]
+            duplicate = connection.execute(
+                """
+                SELECT timetable_id FROM timetable
+                WHERE department = ? AND year = ? AND semester = ?
+                  AND section = ? AND day = ? AND slot = ?
+                  AND academic_batch = ? AND course_id = ?
+                LIMIT 1
+                """,
+                (
+                    entry["department"], entry["year"], entry["semester"],
+                    entry["section"], entry["day"], entry["slot"],
+                    entry["academic_batch"], course_id,
+                )
+            ).fetchone()
+            if duplicate:
+                timetable_skipped += 1
+                continue
+
+            connection.execute(
+                """
+                INSERT INTO timetable (
+                    department, year, semester, section, day, slot,
+                    start_time, end_time, course_code, course_name,
+                    faculty_name, room_number, course_id, academic_batch
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry["department"], entry["year"], entry["semester"],
+                    entry["section"], entry["day"], entry["slot"],
+                    entry["start_time"], entry["end_time"], entry["course_code"],
+                    entry["course_name"], entry["faculty_name"],
+                    entry["room_number"], course_id, entry["academic_batch"],
+                )
+            )
+            timetable_added += 1
+
+        for structure_id in structure_ids.values():
+            connection.execute(
+                "UPDATE semester_course_structure SET is_locked = 1 WHERE structure_id = ?",
+                (structure_id,)
+            )
+
+        connection.commit()
+        return {
+            "structures": len(structure_ids),
+            "courses": len(course_ids),
+            "sections_added": sections_added,
+            "timetable_added": timetable_added,
+            "timetable_skipped": timetable_skipped,
+            "conflicts_skipped": len(parsed_schedule.get("conflicts", [])),
+            "warnings": parsed_schedule.get("warnings", []),
+        }
+    except (sqlite3.Error, KeyError, ValueError):
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def register_faculty(
+    employee_id,
+    full_name,
+    department,
+    email,
+    phone,
+    password,
+    qualification,
+    experience,
+    designation,
+    courses,
+):
+    connection = get_connection()
+    try:
+        _ensure_faculty_course_requests_table(connection)
+        cursor = connection.execute(
+            """
+            INSERT INTO faculty (
+                employee_id, full_name, department, email, phone, password,
+                qualification, experience, designation, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending Approval')
+            """,
+            (
+                employee_id.strip(),
+                full_name.strip(),
+                department,
+                email.strip().lower(),
+                phone.strip(),
+                hash_password(password),
+                qualification.strip(),
+                experience,
+                designation.strip(),
+            )
+        )
+        faculty_id = cursor.lastrowid
+        for course in courses:
+            connection.execute(
+                """
+                INSERT INTO faculty_course_requests
+                    (faculty_id, course_code, course_name)
+                VALUES (?, ?, ?)
+                """,
+                (faculty_id, course.get("course_code"), course["course_name"])
+            )
+        connection.commit()
+        return faculty_id
+    except sqlite3.IntegrityError:
+        connection.rollback()
+        return None
+    finally:
+        connection.close()
+
+
+def get_pending_faculty_registrations():
+    connection = get_connection()
+    _ensure_faculty_course_requests_table(connection)
+    rows = connection.execute(
+        """
+        SELECT faculty_id, employee_id, full_name, department, email,
+               phone, qualification, experience, designation
+        FROM faculty
+        WHERE status = 'Pending Approval'
+        ORDER BY full_name
+        """
+    ).fetchall()
+    registrations = []
+    for row in rows:
+        faculty = dict(row)
+        faculty["requested_courses"] = [
+            dict(course)
+            for course in connection.execute(
+                """
+                SELECT course_code, course_name
+                FROM faculty_course_requests
+                WHERE faculty_id = ?
+                ORDER BY course_name
+                """,
+                (faculty["faculty_id"],)
+            ).fetchall()
+        ]
+        registrations.append(faculty)
+    connection.close()
+    return registrations
+
+
+def approve_faculty_registration(faculty_id, section, year, semester):
+    connection = get_connection()
+    try:
+        _ensure_faculty_course_requests_table(connection)
+        faculty = connection.execute(
+            """
+            SELECT department FROM faculty
+            WHERE faculty_id = ? AND status = 'Pending Approval'
+            """,
+            (faculty_id,)
+        ).fetchone()
+        if faculty is None:
+            return False
+
+        connection.execute(
+            "UPDATE faculty SET status = 'Active' WHERE faculty_id = ?",
+            (faculty_id,)
+        )
+        connection.execute(
+            """
+            INSERT INTO faculty_section_mapping
+                (faculty_id, section, year, semester, department)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (faculty_id, section, year, semester, faculty["department"])
+        )
+        requested_courses = connection.execute(
+            """
+            SELECT course_code, course_name
+            FROM faculty_course_requests
+            WHERE faculty_id = ?
+            """,
+            (faculty_id,)
+        ).fetchall()
+        for course in requested_courses:
+            course_row = connection.execute(
+                """
+                SELECT course_id, semester FROM courses
+                WHERE department = ? AND (
+                    (COALESCE(catalog_code, course_code) = ? AND ? IS NOT NULL)
+                    OR course_name = ?
+                )
+                LIMIT 1
+                """,
+                (
+                    faculty["department"],
+                    course["course_code"],
+                    course["course_code"],
+                    course["course_name"],
+                )
+            ).fetchone()
+            if course_row:
+                connection.execute(
+                    """
+                    INSERT INTO faculty_course_mapping
+                        (faculty_id, course_id, semester)
+                    VALUES (?, ?, ?)
+                    """,
+                    (faculty_id, course_row["course_id"], course_row["semester"] or semester)
+                )
+        connection.commit()
+        return True
+    except sqlite3.Error:
+        connection.rollback()
+        return False
+    finally:
+        connection.close()
+
+
+def reject_faculty_registration(faculty_id):
+    connection = get_connection()
+    cursor = connection.execute(
+        """
+        UPDATE faculty SET status = 'Rejected'
+        WHERE faculty_id = ? AND status = 'Pending Approval'
+        """,
+        (faculty_id,)
+    )
+    connection.commit()
+    connection.close()
+    return cursor.rowcount > 0
 
 
 # ===========================================================
@@ -2438,6 +3350,42 @@ def add_admin(username, password, full_name, email):
     finally:
 
         connection.close()
+
+
+def ensure_default_admin():
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute("SELECT admin_id FROM admin WHERE username = ?", ("abhishek",))
+    if cursor.fetchone() is None:
+        cursor.execute("SELECT admin_id FROM admin WHERE username = ?", ("admin",))
+        legacy_admin = cursor.fetchone()
+        if legacy_admin:
+            cursor.execute(
+                """
+                UPDATE admin
+                SET username = ?, password = ?
+                WHERE admin_id = ?
+                """,
+                ("abhishek", hash_password("abhishek@123"), legacy_admin["admin_id"])
+            )
+        elif cursor.execute("SELECT COUNT(*) FROM admin").fetchone()[0] == 0:
+            cursor.execute(
+                """
+                INSERT INTO admin (username, password, full_name, email)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    "abhishek",
+                    hash_password("abhishek@123"),
+                    "System Administrator",
+                    "admin@college.edu",
+                )
+            )
+        else:
+            connection.close()
+            return
+        connection.commit()
+    connection.close()
 
 
 # ----------------------------------------------------------
@@ -2578,6 +3526,9 @@ def faculty_login(employee_id, password):
     if faculty is None:
         return None
 
+    if (faculty["status"] or "Active") != "Active":
+        return None
+
     if verify_password(password, faculty["password"]):
         return faculty
 
@@ -2629,8 +3580,10 @@ def change_student_password(student_id, new_password):
     ))
 
     connection.commit()
+    updated = cursor.rowcount > 0
 
     connection.close()
+    return updated
 
 
 # ----------------------------------------------------------
@@ -2658,8 +3611,54 @@ def change_faculty_password(faculty_id, new_password):
     ))
 
     connection.commit()
+    updated = cursor.rowcount > 0
 
     connection.close()
+    return updated
+
+
+def get_password_reset_account(role, identifier, submitted_phone):
+    def mobile_digits(value):
+        digits = "".join(
+            character for character in str(value or "") if character.isdigit()
+        )
+        if len(digits) == 10:
+            return digits
+        if len(digits) == 11 and digits.startswith("0"):
+            return digits[1:]
+        if len(digits) == 12 and digits.startswith("91"):
+            return digits[2:]
+        return None
+
+    submitted_digits = mobile_digits(submitted_phone)
+    if submitted_digits is None:
+        return None
+
+    if role == "Student":
+        query = """
+            SELECT student_id AS account_id, full_name, email, phone
+            FROM students
+            WHERE enrollment_no = ? AND account_status = 'Active'
+        """
+    elif role == "Faculty":
+        query = """
+            SELECT faculty_id AS account_id, full_name, email, phone
+            FROM faculty
+            WHERE employee_id = ? AND status = 'Active'
+        """
+    else:
+        return None
+
+    connection = get_connection()
+    row = connection.execute(query, (identifier.strip(),)).fetchone()
+    connection.close()
+    if row is None or not row["phone"]:
+        return None
+
+    stored_digits = mobile_digits(row["phone"])
+    if stored_digits != submitted_digits:
+        return None
+    return dict(row)
 
 
 # ----------------------------------------------------------
@@ -2708,7 +3707,9 @@ def get_all_students():
             roll_number,
             full_name,
             department,
-            semester
+            NULLIF(semester, 0) AS semester,
+            NULLIF(cgpa, 0) AS cgpa,
+            NULLIF(attendance_percentage, 0) AS attendance_percentage
         FROM students
         ORDER BY roll_number
         """,
@@ -3589,6 +4590,91 @@ def upgrade_student_approval_system():
 
                 print(f"Added student approval column: {column}")
 
+        cursor.execute("PRAGMA table_info(faculty)")
+        faculty_columns = [row[1] for row in cursor.fetchall()]
+        faculty_new_columns = {
+            "qualification": "TEXT",
+            "experience": "INTEGER",
+            "designation": "TEXT",
+            "status": "TEXT DEFAULT 'Active'",
+        }
+        for column, data_type in faculty_new_columns.items():
+            if column not in faculty_columns:
+                cursor.execute(
+                    f"ALTER TABLE faculty ADD COLUMN {column} {data_type}"
+                )
+
+        cursor.execute(
+            "UPDATE faculty SET status = 'Active' WHERE status IS NULL"
+        )
+
+        cursor.execute("PRAGMA table_info(courses)")
+        course_columns = [row[1] for row in cursor.fetchall()]
+        if "catalog_code" not in course_columns:
+            cursor.execute("ALTER TABLE courses ADD COLUMN catalog_code TEXT")
+
+        cursor.execute("PRAGMA table_info(semester_registrations)")
+        registration_columns = [row[1] for row in cursor.fetchall()]
+        if "section" not in registration_columns:
+            cursor.execute(
+                "ALTER TABLE semester_registrations ADD COLUMN section TEXT"
+            )
+
+        cursor.execute("PRAGMA table_info(timetable)")
+        timetable_columns = [row[1] for row in cursor.fetchall()]
+        for column in ("course_id", "faculty_id", "academic_batch"):
+            if column not in timetable_columns:
+                cursor.execute(f"ALTER TABLE timetable ADD COLUMN {column} INTEGER")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS faculty_teaching_requests (
+                request_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                faculty_id INTEGER NOT NULL,
+                course_id INTEGER NOT NULL,
+                department TEXT NOT NULL,
+                year INTEGER NOT NULL,
+                semester INTEGER NOT NULL,
+                academic_batch TEXT NOT NULL,
+                section TEXT NOT NULL,
+                day TEXT NOT NULL,
+                slot TEXT NOT NULL,
+                start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL,
+                room_number TEXT,
+                status TEXT NOT NULL DEFAULT 'Pending',
+                reviewed_by TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(faculty_id) REFERENCES faculty(faculty_id),
+                FOREIGN KEY(course_id) REFERENCES courses(course_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS attendance_sessions (
+                session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timetable_id INTEGER NOT NULL,
+                faculty_id INTEGER NOT NULL,
+                session_date TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(timetable_id, session_date),
+                FOREIGN KEY(timetable_id) REFERENCES timetable(timetable_id),
+                FOREIGN KEY(faculty_id) REFERENCES faculty(faculty_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS attendance_session_records (
+                session_id INTEGER NOT NULL,
+                student_id INTEGER NOT NULL,
+                is_present INTEGER NOT NULL CHECK(is_present IN (0, 1)),
+                PRIMARY KEY(session_id, student_id),
+                FOREIGN KEY(session_id) REFERENCES attendance_sessions(session_id)
+                    ON DELETE CASCADE,
+                FOREIGN KEY(student_id) REFERENCES students(student_id)
+                    ON DELETE CASCADE
+            )
+        """)
+
         connection.commit()
 
         print("Student approval system upgrade completed.")
@@ -3606,6 +4692,73 @@ if __name__ == "__main__":
     initialize_database()
     upgrade_student_registration_system()
     upgrade_student_approval_system()
+
+# =========================================================
+# STUDENT NOTIFICATIONS
+# =========================================================
+
+def _ensure_student_notifications_table(connection):
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS student_notifications (
+            notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_read INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(student_id) REFERENCES students(student_id)
+                ON DELETE CASCADE
+        )
+    """)
+
+
+def create_student_notification(student_id, title, message):
+    connection = get_connection()
+    _ensure_student_notifications_table(connection)
+    cursor = connection.execute(
+        """
+        INSERT INTO student_notifications (student_id, title, message)
+        VALUES (?, ?, ?)
+        """,
+        (student_id, title, message)
+    )
+    connection.commit()
+    notification_id = cursor.lastrowid
+    connection.close()
+    return notification_id
+
+
+def get_student_notifications(student_id, limit=20):
+    connection = get_connection()
+    _ensure_student_notifications_table(connection)
+    notifications = connection.execute(
+        """
+        SELECT notification_id, title, message, created_at, is_read
+        FROM student_notifications
+        WHERE student_id = ?
+        ORDER BY created_at DESC, notification_id DESC
+        LIMIT ?
+        """,
+        (student_id, limit)
+    ).fetchall()
+    connection.close()
+    return [dict(notification) for notification in notifications]
+
+
+def mark_student_notifications_read(student_id):
+    connection = get_connection()
+    _ensure_student_notifications_table(connection)
+    connection.execute(
+        """
+        UPDATE student_notifications
+        SET is_read = 1
+        WHERE student_id = ? AND is_read = 0
+        """,
+        (student_id,)
+    )
+    connection.commit()
+    connection.close()
+
 
 # =========================================================
 # GET PENDING STUDENT APPLICATIONS
@@ -3635,8 +4788,7 @@ def get_pending_student_applications():
             account_status,
             created_at
         FROM students
-        WHERE account_status = 'Pending Approval'
-        AND email_verified = 1
+        WHERE account_status IN ('Pending Approval', 'Pending Verification')
         ORDER BY student_id DESC
     """)
 
@@ -3666,8 +4818,7 @@ def approve_student(student_id, approved_by="Admin"):
                 approved_at = CURRENT_TIMESTAMP,
                 rejection_reason = NULL
             WHERE student_id = ?
-            AND email_verified = 1
-            AND account_status = 'Pending Approval'
+            AND account_status IN ('Pending Approval', 'Pending Verification')
         """, (
             approved_by,
             student_id
@@ -3715,8 +4866,7 @@ def reject_student(
                 approved_at = CURRENT_TIMESTAMP,
                 rejection_reason = ?
             WHERE student_id = ?
-            AND email_verified = 1
-            AND account_status = 'Pending Approval'
+            AND account_status IN ('Pending Approval', 'Pending Verification')
         """, (
             rejected_by,
             reason,
@@ -3768,8 +4918,7 @@ def get_pending_student_applications():
             account_status,
             created_at
         FROM students
-        WHERE account_status = 'Pending Approval'
-        AND email_verified = 1
+        WHERE account_status IN ('Pending Approval', 'Pending Verification')
         ORDER BY student_id DESC
     """)
 
@@ -3799,8 +4948,7 @@ def approve_student(student_id, approved_by="Admin"):
                 approved_at = CURRENT_TIMESTAMP,
                 rejection_reason = NULL
             WHERE student_id = ?
-            AND email_verified = 1
-            AND account_status = 'Pending Approval'
+            AND account_status IN ('Pending Approval', 'Pending Verification')
         """, (
             approved_by,
             student_id
@@ -3843,8 +4991,7 @@ def reject_student(student_id, reason="", rejected_by="Admin"):
                 approved_at = CURRENT_TIMESTAMP,
                 rejection_reason = ?
             WHERE student_id = ?
-            AND email_verified = 1
-            AND account_status = 'Pending Approval'
+            AND account_status IN ('Pending Approval', 'Pending Verification')
         """, (
             rejected_by,
             reason,

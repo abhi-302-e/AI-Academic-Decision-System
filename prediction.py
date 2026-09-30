@@ -94,15 +94,70 @@ def prepare_input(student_data):
     and apply scaling.
     """
 
-    dataframe = pd.DataFrame([student_data])
+    dataframe = pd.DataFrame([dict(student_data)])
+    mark_columns = [
+        "assignment_marks",
+        "quiz_marks",
+        "mid_exam_marks",
+        "end_sem_marks",
+        "lab_marks",
+    ]
+    numeric_columns = [
+        "cgpa",
+        "attendance_percentage",
+        *mark_columns,
+        "lms_login_frequency",
+        "time_spent_learning",
+        "course_completion_percentage",
+        "classroom_participation",
+        "communication_skills",
+        "discipline_score",
+    ]
+    for column in numeric_columns:
+        if column not in dataframe:
+            dataframe[column] = 0
+        dataframe[column] = pd.to_numeric(
+            dataframe[column], errors="coerce"
+        ).fillna(0)
 
-    dataframe = dataframe[FEATURE_COLUMNS]
+    if "average_marks" not in dataframe or pd.isna(dataframe.at[0, "average_marks"]):
+        dataframe["average_marks"] = dataframe[mark_columns].mean(axis=1)
+    if "performance_score" not in dataframe or pd.isna(dataframe.at[0, "performance_score"]):
+        dataframe["performance_score"] = (
+            dataframe["average_marks"] * 0.7
+            + dataframe["attendance_percentage"] * 0.3
+        )
+    if "engagement_score" not in dataframe or pd.isna(dataframe.at[0, "engagement_score"]):
+        dataframe["engagement_score"] = (
+            dataframe["lms_login_frequency"] * 0.4
+            + dataframe["time_spent_learning"] * 0.3
+            + dataframe["classroom_participation"] * 3
+        )
+    dataframe["total_marks"] = dataframe[mark_columns].sum(axis=1)
 
-    dataframe[FEATURE_COLUMNS] = scaler.transform(
-        dataframe[FEATURE_COLUMNS]
-    )
+    scaler_columns = [
+        "cgpa",
+        "attendance_percentage",
+        "assignment_marks",
+        "quiz_marks",
+        "mid_exam_marks",
+        "end_sem_marks",
+        "lab_marks",
+        "average_marks",
+        "lms_login_frequency",
+        "time_spent_learning",
+        "course_completion_percentage",
+        "classroom_participation",
+        "communication_skills",
+        "discipline_score",
+        "total_marks",
+        "performance_score",
+        "engagement_score",
+    ]
+    scaled_data = scaler.transform(dataframe[scaler_columns])
+    scaled_dataframe = pd.DataFrame(scaled_data, columns=scaler_columns)
 
-    return dataframe
+    return scaled_dataframe[FEATURE_COLUMNS]
 # ==========================================================
 # PERFORMANCE PREDICTION
 # ==========================================================

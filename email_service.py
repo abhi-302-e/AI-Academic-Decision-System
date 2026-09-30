@@ -1,5 +1,4 @@
 import os
-import random
 import smtplib
 from email.message import EmailMessage
 
@@ -10,17 +9,6 @@ from email.message import EmailMessage
 
 EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
 EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
-
-
-# =========================================================
-# GENERATE OTP
-# =========================================================
-
-def generate_otp():
-    """
-    Generate a 6-digit email verification OTP.
-    """
-    return str(random.randint(100000, 999999))
 
 
 # =========================================================
@@ -52,39 +40,6 @@ def send_email(to_email, subject, body):
         smtp.send_message(message)
 
     return True
-
-
-# =========================================================
-# SEND VERIFICATION OTP
-# =========================================================
-
-def send_verification_otp(to_email, otp):
-
-    subject = "Student Registration - Gmail Verification"
-
-    body = f"""
-Dear Student,
-
-Welcome to the AI Academic Decision System.
-
-Your Gmail verification OTP is:
-
-{otp}
-
-This OTP is valid for 10 minutes.
-
-Please do not share this OTP with anyone.
-
-Regards,
-University Academic Administration
-AI Academic Decision System
-"""
-
-    return send_email(
-        to_email,
-        subject,
-        body
-    )
 
 
 # =========================================================

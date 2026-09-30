@@ -17,37 +17,17 @@ if str(PROJECT_ROOT) not in sys.path:
 # ---------------------------------------------------------
 from database import (
     create_new_student_account,
-    create_email_verification,
-    verify_email_otp,
-)
-
-# ---------------------------------------------------------
-# EMAIL IMPORTS
-# ---------------------------------------------------------
-from email_service import (
-    generate_otp,
-    send_verification_otp,
-    send_enrollment_email,
 )
 
 # ---------------------------------------------------------
 # PAGE CONFIG
 # ---------------------------------------------------------
-st.set_page_config(
-    page_title="New Student Registration",
-    page_icon="🎓",
-    layout="wide"
-)
-
 # ---------------------------------------------------------
 # SESSION STATE
 # ---------------------------------------------------------
 defaults = {
     "registration_step": 1,
-    "pending_student_id": None,
-    "pending_email": None,
     "pending_enrollment_no": None,
-    "registration_completed": False,
     "student_data": {},
 }
 
@@ -130,6 +110,7 @@ if st.session_state.registration_step == 1:
                 [
                     "Computer Science and Engineering",
                     "Artificial Intelligence and Machine Learning",
+                    "AI and Data Science",
                     "Information Technology",
                     "Electronics and Communication Engineering",
                     "Electrical and Electronics Engineering",
@@ -152,8 +133,8 @@ if st.session_state.registration_step == 1:
             )
 
             email = st.text_input(
-                "Gmail Address *",
-                placeholder="example@gmail.com"
+                "Email Address *",
+                placeholder="name@example.com"
             )
 
             address = st.text_area(
@@ -178,7 +159,7 @@ if st.session_state.registration_step == 1:
         st.caption("* Required fields")
 
         submitted = st.form_submit_button(
-            "Create Student Account & Verify Gmail",
+            "Submit Registration",
             use_container_width=True
         )
 
@@ -205,9 +186,7 @@ if st.session_state.registration_step == 1:
             errors.append("Please enter your permanent address.")
 
         if not email.strip():
-            errors.append("Please enter your Gmail address.")
-        elif not email.lower().endswith("@gmail.com"):
-            errors.append("Please enter a valid Gmail address.")
+            errors.append("Please enter your email address.")
 
         if not password:
             errors.append("Please create a password.")
@@ -254,208 +233,23 @@ if st.session_state.registration_step == 1:
             if student_result is None:
 
                 st.error(
-                    "This Gmail address may already be registered. "
+                    "This email address may already be registered. "
                     "If you are already a student, please use your "
                     "Enrollment Number and Password to login."
                 )
 
             else:
 
-                student_id = student_result["student_id"]
                 enrollment_no = student_result["enrollment_no"]
-
-                # -------------------------------------------------
-                # GENERATE OTP
-                # -------------------------------------------------
-                otp = generate_otp()
-
-                # -------------------------------------------------
-                # SAVE OTP
-                # -------------------------------------------------
-                create_email_verification(
-                    student_id=student_id,
-                    email=email.strip().lower(),
-                    otp=otp
-                )
-
-                # -------------------------------------------------
-                # SEND REAL GMAIL OTP
-                # -------------------------------------------------
-                try:
-
-                    send_verification_otp(
-                        to_email=email.strip().lower(),
-                        otp=otp
-                    )
-
-                    # Save temporary information
-                    st.session_state.pending_student_id = student_id
-                    st.session_state.pending_email = email.strip().lower()
-                    st.session_state.pending_enrollment_no = enrollment_no
-
-                    st.session_state.student_data = {
-                        "full_name": full_name.strip(),
-                        "department": department,
-                        "admission_year": admission_year,
-                        "admission_session": admission_session,
-                    }
-
-                    st.session_state.registration_step = 2
-
-                    st.success(
-                        "Student account created successfully!"
-                    )
-
-                    st.rerun()
-
-                except Exception as e:
-
-                    st.error(
-                        "Student account was created, but the Gmail "
-                        "verification email could not be sent."
-                    )
-
-                    st.warning(
-                        "Please check your Gmail configuration and "
-                        "EMAIL_APP_PASSWORD."
-                    )
-
-                    st.code(str(e))
-
-
-# =========================================================
-# STEP 2 — EMAIL VERIFICATION
-# =========================================================
-elif st.session_state.registration_step == 2:
-
-    st.subheader("Step 2: Verify Your Gmail")
-
-    st.write(
-        f"A 6-digit verification code has been sent to "
-        f"**{st.session_state.pending_email}**."
-    )
-
-    st.info(
-        "Check your Gmail inbox and spam folder. "
-        "The verification code is valid for 10 minutes."
-    )
-
-    st.markdown("---")
-
-    otp = st.text_input(
-        "Enter 6-Digit Verification Code",
-        max_chars=6,
-        placeholder="Enter OTP"
-    )
-
-    col1, col2 = st.columns(2)
-
-    # ---------------------------------------------------------
-    # VERIFY OTP
-    # ---------------------------------------------------------
-    with col1:
-
-        if st.button(
-            "✅ Verify Gmail",
-            use_container_width=True
-        ):
-
-            if not otp.strip():
-
-                st.error("Please enter the verification code.")
-
-            elif len(otp.strip()) != 6 or not otp.strip().isdigit():
-
-                st.error(
-                    "Verification code must contain exactly 6 digits."
-                )
-
-            else:
-
-                verified = verify_email_otp(
-                    student_id=st.session_state.pending_student_id,
-                    email=st.session_state.pending_email,
-                    otp=otp.strip()
-                )
-
-                if verified:
-
-                    # ---------------------------------------------
-                    # SEND ENROLLMENT EMAIL
-                    # ---------------------------------------------
-                    try:
-
-                        send_enrollment_email(
-                            to_email=st.session_state.pending_email,
-                            full_name=st.session_state.student_data[
-                                "full_name"
-                            ],
-                            enrollment_no=st.session_state.pending_enrollment_no
-                        )
-
-                        email_sent = True
-
-                    except Exception as e:
-
-                        email_sent = False
-                        st.warning(
-                            "Gmail verified successfully, but the "
-                            "Enrollment Number email could not be sent."
-                        )
-
-                        st.code(str(e))
-
-                    st.session_state.registration_completed = True
-                    st.session_state.registration_step = 3
-
-                    st.success(
-                        "Gmail verified successfully!"
-                    )
-
-                    st.rerun()
-
-                else:
-
-                    st.error(
-                        "Invalid or expired verification code."
-                    )
-
-    # ---------------------------------------------------------
-    # RESEND OTP
-    # ---------------------------------------------------------
-    with col2:
-
-        if st.button(
-            "🔄 Resend OTP",
-            use_container_width=True
-        ):
-
-            new_otp = generate_otp()
-
-            create_email_verification(
-                student_id=st.session_state.pending_student_id,
-                email=st.session_state.pending_email,
-                otp=new_otp
-            )
-
-            try:
-
-                send_verification_otp(
-                    to_email=st.session_state.pending_email,
-                    otp=new_otp
-                )
-
-                st.success(
-                    "A new verification code has been sent to your Gmail."
-                )
-
-            except Exception as e:
-
-                st.error(
-                    "Unable to send the new verification code."
-                )
-
-                st.code(str(e))
+                st.session_state.pending_enrollment_no = enrollment_no
+                st.session_state.student_data = {
+                    "full_name": full_name.strip(),
+                    "department": department,
+                    "admission_year": admission_year,
+                    "admission_session": admission_session,
+                }
+                st.session_state.registration_step = 3
+                st.rerun()
 
 
 # =========================================================
@@ -488,7 +282,8 @@ elif st.session_state.registration_step == 3:
     )
 
     st.info(
-        "Your Enrollment Number has also been sent to your Gmail."
+        "Your registration is waiting for administrator approval. "
+        "You can sign in after it has been approved."
     )
 
     st.markdown("### Student Information")
@@ -521,9 +316,7 @@ elif st.session_state.registration_step == 3:
 
     st.markdown("---")
 
-    st.write(
-        "You can now login using:"
-    )
+    st.write("After approval, log in using:")
 
     st.markdown(
         f"""
@@ -544,13 +337,10 @@ elif st.session_state.registration_step == 3:
 
         # Clear registration session data
         st.session_state.registration_step = 1
-        st.session_state.pending_student_id = None
-        st.session_state.pending_email = None
         st.session_state.pending_enrollment_no = None
-        st.session_state.registration_completed = False
         st.session_state.student_data = {}
 
-        st.switch_page("pages/login.py")
+        st.switch_page("dashboard/login.py")
 
 
 # =========================================================
@@ -569,4 +359,4 @@ if st.session_state.registration_step != 3:
         "← Back to Login"
     ):
 
-        st.switch_page("pages/login.py")
+        st.switch_page("dashboard/login.py")

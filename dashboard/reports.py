@@ -16,12 +16,6 @@ import pandas as pd
 from auth import require_admin
 from database import get_all_students
 
-st.set_page_config(
-    page_title="Reports",
-    page_icon="📄",
-    layout="wide"
-)
-
 require_admin()
 
 st.title("📄 Reports")
@@ -34,7 +28,13 @@ if len(students) == 0:
 
 else:
 
-    csv = students.to_csv(
+    report_data = students.copy()
+    for column in ("semester", "cgpa", "attendance_percentage"):
+        report_data[column] = report_data[column].map(
+            lambda value: "Not recorded" if pd.isna(value) else value
+        )
+
+    csv = report_data.to_csv(
         index=False
     ).encode("utf-8")
 
@@ -45,7 +45,8 @@ else:
         mime="text/csv"
     )
 
+    st.caption("Not recorded means the academic office or faculty has not entered a value yet.")
     st.dataframe(
-        students,
+        report_data,
         use_container_width=True
     )
