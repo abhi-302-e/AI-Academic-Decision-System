@@ -63,6 +63,15 @@ Password-reset OTPs are sent to the registered email and mobile number. They exp
 - Random Forest
 - Logistic Regression
 
+
+## 🌐 Live Demo
+
+🚀 [Open AI Academic Decision System](http://localhost:8501/)
+
+## 💻 GitHub Repository
+
+[View Source Code](https://github.com/abhi-302-e/AI-Academic-Decision-System)
+
 ## Developed For
 
 Academic Decision Support System
