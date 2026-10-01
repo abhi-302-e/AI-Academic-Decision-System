@@ -207,6 +207,30 @@ def predict_student(student_data):
     Predict both performance and risk.
     """
 
+    internal_marks = student_data.get("internal_marks")
+    external_marks = student_data.get("external_marks")
+    if internal_marks is not None and external_marks is not None:
+        total_marks = float(internal_marks) + float(external_marks)
+        attendance = float(student_data.get("attendance_percentage") or 0)
+        if total_marks >= 75:
+            performance = "Distinction"
+        elif total_marks >= 40:
+            performance = "Pass"
+        else:
+            performance = "Fail"
+
+        if attendance < 75 and total_marks < 40:
+            risk = "High"
+        elif attendance < 75 or total_marks < 50:
+            risk = "Medium"
+        else:
+            risk = "Low"
+
+        return {
+            "performance_prediction": performance,
+            "risk_level": risk,
+        }
+
     performance = predict_performance(student_data)
 
     risk = predict_risk(student_data)
@@ -217,6 +241,33 @@ def predict_student(student_data):
 
         "risk_level": risk
 
+    }
+
+
+def predict_registered_course(assessment):
+    """Predict from a fully graded, registered course using Admin-trained models."""
+    course_performance_model = MODEL_DIR / "course_performance_model.pkl"
+    course_risk_model = MODEL_DIR / "course_risk_model.pkl"
+    if (
+        not course_performance_model.exists()
+        or not course_risk_model.exists()
+        or assessment.get("course_attendance") is None
+    ):
+        return None
+
+    features = pd.DataFrame([{
+        "assignment_marks": assessment["assignment_marks"],
+        "quiz_marks": assessment["quiz_marks"],
+        "mid_exam_marks": assessment["mid_exam_marks"],
+        "viva_marks": assessment["viva_marks"],
+        "external_marks": assessment["external_marks"],
+        "course_attendance": assessment["course_attendance"],
+    }])
+    trained_performance_model = joblib.load(course_performance_model)
+    trained_risk_model = joblib.load(course_risk_model)
+    return {
+        "performance_prediction": trained_performance_model.predict(features)[0],
+        "risk_level": trained_risk_model.predict(features)[0],
     }
 
 

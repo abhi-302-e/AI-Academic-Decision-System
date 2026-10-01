@@ -17,6 +17,8 @@ import pandas as pd
 from auth import require_admin
 
 from database import (
+    get_connection,
+    get_course_model_training_data,
     get_all_students,
     get_all_faculty,
     get_student_by_roll,
@@ -32,6 +34,7 @@ from database import (
     reject_student,
     get_pending_faculty_registrations,
     approve_faculty_registration,
+    approve_all_scheduled_faculty,
     reject_faculty_registration,
     get_default_section_names,
     get_pending_faculty_teaching_requests,
@@ -39,6 +42,12 @@ from database import (
     reject_faculty_teaching_request,
     change_student_password,
     change_faculty_password,
+    admin_update_student_profile,
+    admin_update_faculty_profile,
+)
+from models.train_registered_course_models import (
+    prepare_training_data,
+    train_course_models,
 )
 st.title("🎓 AI-Based Autonomous Academic Decision System")
 
@@ -93,7 +102,9 @@ menu = st.sidebar.selectbox(
         "Student Approvals",
         "Faculty Registration Approvals",
         "Faculty Teaching Requests",
+        "Train ML Models",
         "Students",
+        "Manage Academic Records",
         "Faculty",
         "Add Student",
         "Add Faculty",
@@ -151,6 +162,26 @@ if menu == "Dashboard":
         department_count,
         use_container_width=True
     )
+
+elif menu == "Train ML Models":
+
+    st.subheader("Train course performance and risk models")
+    training_data = get_course_model_training_data()
+    training_frame = prepare_training_data(training_data)
+    st.metric("Complete registered-course records with attendance", len(training_frame))
+    if len(training_frame) < 20:
+        st.warning("At least 20 complete registered-course assessment records with attendance are required. No demo or unregistered student marks are used.")
+    else:
+        st.write("**Performance labels:**", training_frame["performance_label"].value_counts().to_dict())
+        st.write("**Risk labels:**", training_frame["risk_label"].value_counts().to_dict())
+        if st.button("Train models from registered course data", type="primary"):
+            try:
+                result = train_course_models(admin.get("username", "Admin"))
+                st.success(f"Models trained using {result['samples']} course records.")
+                st.metric("Performance holdout accuracy", f"{result['performance_accuracy']:.1%}")
+                st.metric("Risk holdout accuracy", f"{result['risk_accuracy']:.1%}")
+            except ValueError as error:
+                st.error(str(error))
 
 elif menu == "Student Approvals":
 
@@ -225,6 +256,41 @@ elif menu == "Faculty Registration Approvals":
     st.subheader("Pending Faculty Registrations")
     pending_faculty = get_pending_faculty_registrations()
     st.metric("Pending faculty registrations", len(pending_faculty))
+    timetable_roster = [
+        member for member in pending_faculty
+        if member["employee_id"].startswith("SCHED")
+    ]
+    if timetable_roster:
+        confirm_roster = st.checkbox(
+            f"I reviewed the timetable roster of {len(timetable_roster)} faculty members",
+            key="confirm_bulk_timetable_faculty"
+        )
+        if st.button(
+            "Approve all timetable faculty and assign their sections",
+            type="primary",
+            disabled=not confirm_roster,
+            use_container_width=True
+        ):
+            approved = approve_all_scheduled_faculty()
+            st.success(f"Approved and assigned {approved} timetable faculty members.")
+            st.rerun()
+    schedule_roster_count = sum(bool(faculty_member.get("employee_id", "").startswith("SCHED")) for faculty_member in pending_faculty)
+    if schedule_roster_count:
+        confirm_schedule_faculty = st.checkbox(
+            f"I verified the imported timetable roster ({schedule_roster_count} faculty members)",
+            key="confirm_schedule_faculty_bulk_approval"
+        )
+        if st.button(
+            "Approve all timetable faculty and assign their scheduled sections",
+            disabled=not confirm_schedule_faculty,
+            type="primary",
+            use_container_width=True
+        ):
+            approved_count = approve_all_scheduled_faculty(
+                admin.get("username", admin.get("email", "Admin"))
+            )
+            st.success(f"Approved and assigned {approved_count} timetable faculty members.")
+            st.rerun()
 
     if not pending_faculty:
         st.success("There are no faculty registrations awaiting approval.")
@@ -357,6 +423,95 @@ elif menu == "Students":
         students,
         use_container_width=True
     )
+
+elif menu == "Manage Academic Records":
+
+    st.subheader("Manage Student Academic Records")
+    records = get_all_students().to_dict("records")
+    if not records:
+        st.info("No student records are available.")
+    else:
+        student_options = {
+            f"{record['roll_number']} · {record['full_name']}": record["roll_number"]
+            for record in records
+        }
+        selected_student = st.selectbox("Student", list(student_options))
+        student_record = get_student_by_roll(student_options[selected_student])
+
+        if student_record:
+            departments = sorted({row["department"] for row in records if row["department"]})
+            if student_record["department"] not in departments:
+                departments.append(student_record["department"])
+            with st.form("admin_student_academic_profile"):
+                identity_col, academic_col = st.columns(2)
+                with identity_col:
+                    full_name = st.text_input("Full name", value=student_record["full_name"])
+                    email = st.text_input("Email", value=student_record["email"])
+                    phone = st.text_input("Phone", value=student_record["phone"] or "")
+                    gender = st.selectbox(
+                        "Gender",
+                        ["Male", "Female", "Other"],
+                        index=["Male", "Female", "Other"].index(student_record["gender"])
+                        if student_record["gender"] in ["Male", "Female", "Other"] else 0,
+                    )
+                    department = st.selectbox(
+                        "Department",
+                        departments,
+                        index=departments.index(student_record["department"]),
+                    )
+                with academic_col:
+                    current_year = st.selectbox(
+                        "Current year", [1, 2, 3, 4],
+                        index=max(0, min(int(student_record["current_year"] or 1) - 1, 3)),
+                    )
+                    semester = st.selectbox(
+                        "Semester", list(range(1, 9)),
+                        index=max(0, min(int(student_record["semester"] or 1) - 1, 7)),
+                    )
+                    section = st.selectbox(
+                        "Section", list("ABCDEFGHIJ"),
+                        index="ABCDEFGHIJ".index(student_record["section"])
+                        if student_record["section"] in "ABCDEFGHIJ" else 0,
+                    )
+                    cgpa = st.number_input(
+                        "CGPA (0–10)", min_value=0.0, max_value=10.0,
+                        value=float(student_record["cgpa"] or 0), step=0.01,
+                    )
+                    attendance_percentage = st.number_input(
+                        "Attendance (0–100%)", min_value=0.0, max_value=100.0,
+                        value=float(student_record["attendance_percentage"] or 0), step=0.1,
+                    )
+                    internal_marks = st.number_input(
+                        "Internal marks (/60)", min_value=0.0, max_value=60.0,
+                        value=float(student_record["internal_marks"] or 0), step=0.5,
+                    )
+                    external_marks = st.number_input(
+                        "External marks (/40)", min_value=0.0, max_value=40.0,
+                        value=float(student_record["external_marks"] or 0), step=0.5,
+                    )
+                update_student_record = st.form_submit_button("Save student profile", type="primary")
+
+            if update_student_record:
+                success, message = admin_update_student_profile(
+                    student_record["student_id"],
+                    full_name,
+                    gender,
+                    department,
+                    email,
+                    phone,
+                    current_year,
+                    semester,
+                    section,
+                    cgpa,
+                    attendance_percentage,
+                    internal_marks,
+                    external_marks,
+                )
+                if success:
+                    st.success(message)
+                    st.rerun()
+                else:
+                    st.error(message)
 
 
 # ==========================================================
@@ -537,19 +692,60 @@ elif menu == "Update Faculty":
             value=faculty["phone"]
         )
 
+        qualification = st.text_input(
+            "Qualification",
+            value=faculty["qualification"] or ""
+        )
+
+        experience = st.number_input(
+            "Teaching experience (years)",
+            min_value=0,
+            max_value=60,
+            value=int(faculty["experience"] or 0)
+        )
+
+        designation_options = [
+            "Lecturer",
+            "Assistant Professor",
+            "Associate Professor",
+            "Professor",
+        ]
+        if faculty["designation"] and faculty["designation"] not in designation_options:
+            designation_options.append(faculty["designation"])
+        designation = st.selectbox(
+            "Designation",
+            designation_options,
+            index=designation_options.index(faculty["designation"])
+            if faculty["designation"] in designation_options else 0,
+        )
+
+        status_options = ["Active", "Pending Approval", "Rejected"]
+        status = st.selectbox(
+            "Account status",
+            status_options,
+            index=status_options.index(faculty["status"])
+            if faculty["status"] in status_options else 0,
+        )
+
         if st.button("Update Faculty"):
 
-            update_faculty(
+            success = admin_update_faculty_profile(
                 faculty["faculty_id"],
                 full_name,
                 department,
                 email,
-                phone
+                phone,
+                qualification,
+                experience,
+                designation,
+                status,
             )
 
             del st.session_state.faculty
-
-            st.success("Faculty Updated Successfully")
+            if success:
+                st.success("Faculty profile updated successfully.")
+            else:
+                st.error("Faculty profile could not be updated. Check for duplicate email addresses.")
 
 
 

@@ -1093,7 +1093,7 @@ def register_student_for_semester(
         ).fetchone()
         student = cursor.execute(
             """
-            SELECT department, current_year, account_status
+            SELECT department, current_year, account_status, section
             FROM students
             WHERE student_id = ?
             """,
@@ -1110,6 +1110,7 @@ def register_student_for_semester(
             or _department_key(structure["department"])
                 != _department_key(student["department"])
             or section not in "ABCDEFGHIJ"
+            or (student["section"] is not None and student["section"] != section)
         ):
             return None
 
@@ -1505,6 +1506,405 @@ def get_session_attendance_roster(timetable_id, faculty_id):
         ORDER BY s.roll_number
         """,
         (timetable["structure_id"], timetable["section"], timetable["course_id"])
+    ).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def get_course_assessment_roster(timetable_id, faculty_id):
+    connection = get_connection()
+    timetable = connection.execute(
+        """
+        SELECT t.course_id, t.section, c.structure_id
+        FROM timetable t
+        JOIN courses c ON c.course_id = t.course_id
+        WHERE t.timetable_id = ? AND t.faculty_id = ?
+        """,
+        (timetable_id, faculty_id)
+    ).fetchone()
+    if timetable is None:
+        connection.close()
+        return []
+    rows = connection.execute(
+        """
+        SELECT DISTINCT s.student_id, s.roll_number, s.full_name,
+               ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
+               ca.viva_marks, ca.external_marks
+        FROM semester_registrations sr
+        JOIN student_registered_courses src
+            ON src.registration_id = sr.registration_id
+        JOIN students s ON s.student_id = sr.student_id
+        LEFT JOIN course_assessments ca
+            ON ca.registration_id = sr.registration_id
+           AND ca.student_id = s.student_id
+           AND ca.course_id = src.course_id
+        WHERE sr.structure_id = ? AND sr.section = ?
+          AND sr.status = 'Registered' AND src.course_id = ?
+          AND s.account_status = 'Active'
+        ORDER BY s.roll_number
+        """,
+        (timetable["structure_id"], timetable["section"], timetable["course_id"])
+    ).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def get_course_attendance_percentage(student_id, course_id, section):
+    connection = get_connection()
+    result = connection.execute(
+        """
+        SELECT COUNT(*) AS total_sessions,
+               COALESCE(SUM(ar.is_present), 0) AS present_sessions
+        FROM attendance_session_records ar
+        JOIN attendance_sessions sess ON sess.session_id = ar.session_id
+        JOIN timetable t ON t.timetable_id = sess.timetable_id
+        WHERE ar.student_id = ? AND t.course_id = ? AND t.section = ?
+        """,
+        (student_id, course_id, section)
+    ).fetchone()
+    connection.close()
+    if not result or result["total_sessions"] == 0:
+        return None
+    return round(100 * result["present_sessions"] / result["total_sessions"], 2)
+
+
+def save_course_assessment(timetable_id, faculty_id, student_id, scores):
+    limits = {
+        "assignment_marks": 10,
+        "quiz_marks": 10,
+        "mid_exam_marks": 30,
+        "viva_marks": 10,
+        "external_marks": 40,
+    }
+    try:
+        normalized_scores = {key: float(scores[key]) for key in limits}
+    except (KeyError, TypeError, ValueError):
+        return False, "Enter all course assessment components."
+    if any(value < 0 or value > limits[key] for key, value in normalized_scores.items()):
+        return False, "Marks exceed the maximum for one or more components."
+
+    connection = get_connection()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        schedule = connection.execute(
+            """
+            SELECT t.course_id, t.section, t.department, t.year, t.semester,
+                   c.structure_id
+            FROM timetable t
+            JOIN courses c ON c.course_id = t.course_id
+            WHERE t.timetable_id = ? AND t.faculty_id = ?
+            """,
+            (timetable_id, faculty_id)
+        ).fetchone()
+        if schedule is None:
+            return False, "This faculty member is not assigned to this course."
+
+        registration = connection.execute(
+            """
+            SELECT sr.registration_id
+            FROM semester_registrations sr
+            JOIN student_registered_courses src
+                ON src.registration_id = sr.registration_id
+            JOIN students s ON s.student_id = sr.student_id
+            WHERE sr.student_id = ? AND sr.structure_id = ?
+              AND sr.section = ? AND sr.status = 'Registered'
+              AND src.course_id = ? AND s.current_year = ?
+              AND s.semester = ? AND s.section = ?
+              AND s.account_status = 'Active'
+            LIMIT 1
+            """,
+            (
+                student_id, schedule["structure_id"], schedule["section"],
+                schedule["course_id"], schedule["year"], schedule["semester"],
+                schedule["section"],
+            )
+        ).fetchone()
+        if registration is None:
+            return False, "Student must be registered in this course, semester, and section before marks are entered."
+
+        connection.execute(
+            """
+            INSERT INTO course_assessments (
+                student_id, registration_id, course_id, faculty_id,
+                assignment_marks, quiz_marks, mid_exam_marks, viva_marks,
+                external_marks, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(student_id, registration_id, course_id) DO UPDATE SET
+                faculty_id = excluded.faculty_id,
+                assignment_marks = excluded.assignment_marks,
+                quiz_marks = excluded.quiz_marks,
+                mid_exam_marks = excluded.mid_exam_marks,
+                viva_marks = excluded.viva_marks,
+                external_marks = excluded.external_marks,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                student_id, registration["registration_id"], schedule["course_id"],
+                faculty_id, normalized_scores["assignment_marks"],
+                normalized_scores["quiz_marks"], normalized_scores["mid_exam_marks"],
+                normalized_scores["viva_marks"], normalized_scores["external_marks"],
+            )
+        )
+        connection.commit()
+        return True, "Course marks saved."
+    except sqlite3.Error:
+        connection.rollback()
+        return False, "Course marks could not be saved."
+    finally:
+        connection.close()
+
+
+def get_student_course_assessments(student_id, semester=None):
+    connection = get_connection()
+    query = """
+        SELECT ca.assessment_id, ca.course_id, ca.registration_id,
+               ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
+               ca.viva_marks, ca.external_marks, c.catalog_code AS course_code,
+               c.course_name, c.credits, sr.semester, sr.academic_year,
+               sr.section, sc.year,
+               ROUND(ca.assignment_marks + ca.quiz_marks + ca.mid_exam_marks
+                     + ca.viva_marks, 2) AS internal_total,
+               ROUND(ca.assignment_marks + ca.quiz_marks + ca.mid_exam_marks
+                     + ca.viva_marks + ca.external_marks, 2) AS overall_total
+        FROM course_assessments ca
+        JOIN courses c ON c.course_id = ca.course_id
+        JOIN semester_registrations sr ON sr.registration_id = ca.registration_id
+        JOIN semester_course_structure sc ON sc.structure_id = sr.structure_id
+        WHERE ca.student_id = ? AND sr.status = 'Registered'
+    """
+    params = [student_id]
+    if semester is not None:
+        query += " AND sr.semester = ?"
+        params.append(semester)
+    query += " ORDER BY sr.semester DESC, c.course_name"
+    rows = connection.execute(query, params).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def get_course_model_training_data():
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
+               ca.viva_marks, ca.external_marks,
+               ROUND(ca.assignment_marks + ca.quiz_marks + ca.mid_exam_marks
+                     + ca.viva_marks, 2) AS internal_total,
+               ROUND(ca.assignment_marks + ca.quiz_marks + ca.mid_exam_marks
+                     + ca.viva_marks + ca.external_marks, 2) AS overall_total,
+               COALESCE(attendance.course_attendance, 0) AS course_attendance,
+               sr.semester, sr.section, c.department, c.year
+        FROM course_assessments ca
+        JOIN semester_registrations sr ON sr.registration_id = ca.registration_id
+        JOIN courses c ON c.course_id = ca.course_id
+        LEFT JOIN (
+            SELECT ar.student_id, t.course_id, t.section,
+                   ROUND(100.0 * SUM(ar.is_present) / COUNT(*), 2) AS course_attendance
+            FROM attendance_session_records ar
+            JOIN attendance_sessions sess ON sess.session_id = ar.session_id
+            JOIN timetable t ON t.timetable_id = sess.timetable_id
+            GROUP BY ar.student_id, t.course_id, t.section
+        ) attendance
+            ON attendance.student_id = ca.student_id
+           AND attendance.course_id = ca.course_id
+           AND attendance.section = sr.section
+        WHERE sr.status = 'Registered'
+          AND ca.assignment_marks IS NOT NULL
+          AND ca.quiz_marks IS NOT NULL
+          AND ca.mid_exam_marks IS NOT NULL
+          AND ca.viva_marks IS NOT NULL
+          AND ca.external_marks IS NOT NULL
+        """
+    ).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def get_course_assessment_roster(timetable_id, faculty_id):
+    connection = get_connection()
+    timetable = connection.execute(
+        """
+        SELECT t.course_id, t.section, c.structure_id
+        FROM timetable t
+        JOIN courses c ON c.course_id = t.course_id
+        WHERE t.timetable_id = ? AND t.faculty_id = ?
+        """,
+        (timetable_id, faculty_id)
+    ).fetchone()
+    if timetable is None:
+        connection.close()
+        return []
+    rows = connection.execute(
+        """
+        SELECT DISTINCT s.student_id, s.roll_number, s.full_name,
+               ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
+               ca.viva_marks, ca.external_marks
+        FROM semester_registrations sr
+        JOIN student_registered_courses src
+            ON src.registration_id = sr.registration_id
+        JOIN students s ON s.student_id = sr.student_id
+        LEFT JOIN course_assessments ca
+            ON ca.registration_id = sr.registration_id
+           AND ca.student_id = s.student_id
+           AND ca.course_id = src.course_id
+        WHERE sr.structure_id = ? AND sr.section = ?
+          AND sr.status = 'Registered' AND src.course_id = ?
+        ORDER BY s.roll_number
+        """,
+        (timetable["structure_id"], timetable["section"], timetable["course_id"])
+    ).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def save_course_assessment(timetable_id, faculty_id, student_id, values):
+    limits = {
+        "assignment_marks": (0, 10),
+        "quiz_marks": (0, 10),
+        "mid_exam_marks": (0, 30),
+        "viva_marks": (0, 10),
+        "external_marks": (0, 40),
+    }
+    try:
+        scores = {key: float(values[key]) for key in limits}
+    except (KeyError, TypeError, ValueError):
+        return False, "All five course assessment components must be entered."
+    if any(not low <= scores[key] <= high for key, (low, high) in limits.items()):
+        return False, "A mark is outside its permitted range."
+
+    connection = get_connection()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        schedule = connection.execute(
+            """
+            SELECT t.course_id, t.section, t.department, t.year, t.semester,
+                   c.structure_id
+            FROM timetable t
+            JOIN courses c ON c.course_id = t.course_id
+            WHERE t.timetable_id = ? AND t.faculty_id = ?
+            """,
+            (timetable_id, faculty_id)
+        ).fetchone()
+        if schedule is None:
+            return False, "This faculty member is not assigned to the timetable course."
+
+        registration = connection.execute(
+            """
+            SELECT sr.registration_id
+            FROM semester_registrations sr
+            JOIN student_registered_courses src
+                ON src.registration_id = sr.registration_id
+            JOIN students s ON s.student_id = sr.student_id
+            WHERE sr.student_id = ? AND sr.structure_id = ?
+              AND sr.section = ? AND sr.status = 'Registered'
+              AND src.course_id = ? AND s.current_year = ?
+              AND s.semester = ? AND s.section = ?
+            LIMIT 1
+            """,
+            (
+                student_id, schedule["structure_id"], schedule["section"],
+                schedule["course_id"], schedule["year"], schedule["semester"],
+                schedule["section"],
+            )
+        ).fetchone()
+        if registration is None:
+            return False, "Student must be registered for this course, semester, and section before marks can be entered."
+
+        connection.execute(
+            """
+            INSERT INTO course_assessments (
+                student_id, registration_id, course_id, faculty_id,
+                assignment_marks, quiz_marks, mid_exam_marks, viva_marks,
+                external_marks, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(student_id, registration_id, course_id) DO UPDATE SET
+                faculty_id = excluded.faculty_id,
+                assignment_marks = excluded.assignment_marks,
+                quiz_marks = excluded.quiz_marks,
+                mid_exam_marks = excluded.mid_exam_marks,
+                viva_marks = excluded.viva_marks,
+                external_marks = excluded.external_marks,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                student_id, registration["registration_id"], schedule["course_id"],
+                faculty_id, scores["assignment_marks"], scores["quiz_marks"],
+                scores["mid_exam_marks"], scores["viva_marks"], scores["external_marks"],
+            )
+        )
+        connection.commit()
+        return True, "Course marks saved."
+    except sqlite3.Error:
+        connection.rollback()
+        return False, "Course marks could not be saved."
+    finally:
+        connection.close()
+
+
+def get_student_course_assessments(student_id, semester=None):
+    connection = get_connection()
+    query = """
+        SELECT ca.*, c.catalog_code AS course_code, c.course_name,
+               sr.semester, sr.academic_year, sr.section, sc.year,
+               c.credits, attendance.course_attendance
+        FROM course_assessments ca
+        JOIN courses c ON c.course_id = ca.course_id
+        JOIN semester_registrations sr ON sr.registration_id = ca.registration_id
+        JOIN semester_course_structure sc ON sc.structure_id = sr.structure_id
+        LEFT JOIN (
+            SELECT ar.student_id, t.course_id, t.section,
+                   ROUND(100.0 * SUM(ar.is_present) / COUNT(*), 2) AS course_attendance
+            FROM attendance_session_records ar
+            JOIN attendance_sessions sess ON sess.session_id = ar.session_id
+            JOIN timetable t ON t.timetable_id = sess.timetable_id
+            GROUP BY ar.student_id, t.course_id, t.section
+        ) attendance
+            ON attendance.student_id = ca.student_id
+           AND attendance.course_id = ca.course_id
+           AND attendance.section = sr.section
+        WHERE ca.student_id = ? AND sr.status = 'Registered'
+    """
+    params = [student_id]
+    if semester is not None:
+        query += " AND sr.semester = ?"
+        params.append(semester)
+    query += " ORDER BY sr.semester DESC, c.course_name"
+    rows = connection.execute(query, params).fetchall()
+    connection.close()
+    return [dict(row) for row in rows]
+
+
+def get_course_model_training_data():
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
+             ca.viva_marks, ca.external_marks, attendance.course_attendance,
+               sr.semester, sr.section, c.department, c.year
+        FROM course_assessments ca
+        JOIN semester_registrations sr ON sr.registration_id = ca.registration_id
+        JOIN courses c ON c.course_id = ca.course_id
+         LEFT JOIN (
+             SELECT ar.student_id, t.course_id, t.section,
+                 ROUND(100.0 * SUM(ar.is_present) / COUNT(*), 2) AS course_attendance
+             FROM attendance_session_records ar
+             JOIN attendance_sessions sess ON sess.session_id = ar.session_id
+             JOIN timetable t ON t.timetable_id = sess.timetable_id
+             GROUP BY ar.student_id, t.course_id, t.section
+         ) attendance
+             ON attendance.student_id = ca.student_id
+            AND attendance.course_id = ca.course_id
+            AND attendance.section = sr.section
+        WHERE sr.status = 'Registered'
+          AND ca.assignment_marks IS NOT NULL
+          AND ca.quiz_marks IS NOT NULL
+          AND ca.mid_exam_marks IS NOT NULL
+          AND ca.viva_marks IS NOT NULL
+          AND ca.external_marks IS NOT NULL
+          AND attendance.course_attendance IS NOT NULL
+        """
     ).fetchall()
     connection.close()
     return [dict(row) for row in rows]
@@ -3222,6 +3622,147 @@ def get_pending_faculty_registrations():
     return registrations
 
 
+def approve_all_scheduled_faculty():
+    connection = get_connection()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        faculty_rows = connection.execute(
+            """
+            SELECT DISTINCT f.faculty_id
+            FROM faculty f
+            JOIN timetable t ON t.faculty_id = f.faculty_id
+            WHERE f.status = 'Pending Approval'
+            """
+        ).fetchall()
+        faculty_ids = [row["faculty_id"] for row in faculty_rows]
+        for faculty_id in faculty_ids:
+            connection.execute(
+                "UPDATE faculty SET status = 'Active' WHERE faculty_id = ?",
+                (faculty_id,)
+            )
+            schedule_rows = connection.execute(
+                """
+                SELECT DISTINCT section, year, semester, department, course_id
+                FROM timetable
+                WHERE faculty_id = ?
+                """,
+                (faculty_id,)
+            ).fetchall()
+            for row in schedule_rows:
+                connection.execute(
+                    """
+                    INSERT INTO faculty_section_mapping
+                        (faculty_id, section, year, semester, department)
+                    SELECT ?, ?, ?, ?, ?
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM faculty_section_mapping
+                        WHERE faculty_id = ? AND section = ? AND year = ?
+                          AND semester = ? AND department = ?
+                    )
+                    """,
+                    (
+                        faculty_id, row["section"], row["year"], row["semester"],
+                        row["department"], faculty_id, row["section"],
+                        row["year"], row["semester"], row["department"],
+                    )
+                )
+                if row["course_id"] is not None:
+                    connection.execute(
+                        """
+                        INSERT OR IGNORE INTO faculty_course_mapping
+                            (faculty_id, course_id, semester)
+                        VALUES (?, ?, ?)
+                        """,
+                        (faculty_id, row["course_id"], row["semester"])
+                    )
+        connection.commit()
+        return len(faculty_ids)
+    except sqlite3.Error:
+        connection.rollback()
+        return 0
+    finally:
+        connection.close()
+
+
+def approve_all_scheduled_faculty(approved_by="Admin"):
+    connection = get_connection()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        faculty_rows = connection.execute(
+            """
+            SELECT DISTINCT f.faculty_id, f.department
+            FROM faculty f
+            JOIN timetable t ON t.faculty_id = f.faculty_id
+            WHERE f.status = 'Pending Approval'
+            """
+        ).fetchall()
+        approved_ids = [row["faculty_id"] for row in faculty_rows]
+        if not approved_ids:
+            connection.commit()
+            return 0
+
+        placeholders = ",".join("?" for _ in approved_ids)
+        connection.execute(
+            f"UPDATE faculty SET status = 'Active' WHERE faculty_id IN ({placeholders})",
+            approved_ids
+        )
+
+        for faculty_id in approved_ids:
+            connection.execute(
+                "DELETE FROM faculty_section_mapping WHERE faculty_id = ?",
+                (faculty_id,)
+            )
+            assignments = connection.execute(
+                """
+                SELECT DISTINCT section, year, semester, department
+                FROM timetable
+                WHERE faculty_id = ?
+                """,
+                (faculty_id,)
+            ).fetchall()
+            for assignment in assignments:
+                connection.execute(
+                    """
+                    INSERT INTO faculty_section_mapping
+                        (faculty_id, section, year, semester, department)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        faculty_id,
+                        assignment["section"],
+                        assignment["year"],
+                        assignment["semester"],
+                        assignment["department"],
+                    )
+                )
+
+            courses = connection.execute(
+                """
+                SELECT DISTINCT course_id, semester
+                FROM timetable
+                WHERE faculty_id = ? AND course_id IS NOT NULL
+                """,
+                (faculty_id,)
+            ).fetchall()
+            for course in courses:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO faculty_course_mapping
+                        (faculty_id, course_id, semester)
+                    VALUES (?, ?, ?)
+                    """,
+                    (faculty_id, course["course_id"], course["semester"])
+                )
+
+        connection.commit()
+        return len(approved_ids)
+    except sqlite3.Error:
+        connection.rollback()
+        return 0
+    finally:
+        connection.close()
+
+
 def approve_faculty_registration(faculty_id, section, year, semester):
     connection = get_connection()
     try:
@@ -3617,6 +4158,117 @@ def change_faculty_password(faculty_id, new_password):
     return updated
 
 
+def admin_update_student_profile(
+    student_id,
+    full_name,
+    gender,
+    department,
+    email,
+    phone,
+    current_year,
+    semester,
+    section,
+    cgpa,
+    attendance_percentage,
+    internal_marks,
+    external_marks,
+):
+    if (
+        not 1 <= int(current_year) <= 4
+        or not 1 <= int(semester) <= 8
+        or section not in SECTION_NAMES
+        or not 0 <= float(cgpa) <= 10
+        or not 0 <= float(attendance_percentage) <= 100
+        or not 0 <= float(internal_marks) <= 60
+        or not 0 <= float(external_marks) <= 40
+    ):
+        return False, "One or more academic values are outside their allowed range."
+
+    connection = get_connection()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        student = connection.execute(
+            "SELECT department, current_year, semester, section FROM students WHERE student_id = ?",
+            (student_id,)
+        ).fetchone()
+        if student is None:
+            return False, "Student was not found."
+
+        section_count = connection.execute(
+            """
+            SELECT COUNT(*) FROM students
+            WHERE department = ? AND current_year = ? AND semester = ?
+              AND section = ? AND student_id <> ?
+            """,
+            (department, current_year, semester, section, student_id)
+        ).fetchone()[0]
+        if section_count >= 75:
+            return False, f"Section {section} already has 75 students for this department, year, and semester."
+
+        connection.execute(
+            """
+            UPDATE students
+            SET full_name = ?, gender = ?, department = ?, email = ?, phone = ?,
+                current_year = ?, semester = ?, section = ?, cgpa = ?,
+                attendance_percentage = ?, internal_marks = ?, external_marks = ?
+            WHERE student_id = ?
+            """,
+            (
+                full_name.strip(), gender, department, email.strip().lower(),
+                phone.strip(), int(current_year), int(semester), section,
+                float(cgpa), float(attendance_percentage),
+                float(internal_marks), float(external_marks), student_id,
+            )
+        )
+        connection.commit()
+        return True, "Student profile and academic records updated."
+    except sqlite3.IntegrityError:
+        connection.rollback()
+        return False, "Email or another unique account field is already in use."
+    except sqlite3.Error:
+        connection.rollback()
+        return False, "Student profile could not be updated."
+    finally:
+        connection.close()
+
+
+def admin_update_faculty_profile(
+    faculty_id,
+    full_name,
+    department,
+    email,
+    phone,
+    qualification,
+    experience,
+    designation,
+    status,
+):
+    if status not in {"Active", "Pending Approval", "Rejected"}:
+        return False
+    connection = get_connection()
+    try:
+        cursor = connection.execute(
+            """
+            UPDATE faculty
+            SET full_name = ?, department = ?, email = ?, phone = ?,
+                qualification = ?, experience = ?, designation = ?, status = ?
+            WHERE faculty_id = ?
+            """,
+            (
+                full_name.strip(), department, email.strip().lower(), phone.strip(),
+                qualification.strip(), int(experience), designation, status,
+                faculty_id,
+            )
+        )
+        connection.commit()
+        return cursor.rowcount > 0
+    except sqlite3.IntegrityError:
+        connection.rollback()
+        return False
+    finally:
+        connection.close()
+
+
 def get_password_reset_account(role, identifier, submitted_phone):
     def mobile_digits(value):
         digits = "".join(
@@ -3707,9 +4359,17 @@ def get_all_students():
             roll_number,
             full_name,
             department,
+            current_year,
             NULLIF(semester, 0) AS semester,
+            section,
             NULLIF(cgpa, 0) AS cgpa,
-            NULLIF(attendance_percentage, 0) AS attendance_percentage
+            NULLIF(attendance_percentage, 0) AS attendance_percentage,
+            assignment_marks,
+            quiz_marks,
+            mid_exam_marks,
+            end_sem_marks,
+            internal_marks,
+            external_marks
         FROM students
         ORDER BY roll_number
         """,
@@ -3763,36 +4423,25 @@ def get_student_by_roll(roll_number):
  
     return None
 
-def update_student_marks(
-    student_id,
-    assignment_marks,
-    quiz_marks,
-    mid_exam_marks,
-    end_sem_marks,
-    lab_marks
-):
+def update_student_marks(student_id, internal_marks, external_marks):
     connection = get_connection()
     cursor = connection.cursor()
 
     cursor.execute("""
         UPDATE students
-        SET assignment_marks=?,
-            quiz_marks=?,
-            mid_exam_marks=?,
-            end_sem_marks=?,
-            lab_marks=?
+        SET internal_marks=?,
+            external_marks=?
         WHERE student_id=?
     """, (
-        assignment_marks,
-        quiz_marks,
-        mid_exam_marks,
-        end_sem_marks,
-        lab_marks,
+        internal_marks,
+        external_marks,
         student_id
     ))
 
     connection.commit()
+    updated = cursor.rowcount > 0
     connection.close()
+    return updated
 
 # ===========================================================
 # MARKS OPERATIONS
@@ -4613,6 +5262,12 @@ def upgrade_student_approval_system():
         if "catalog_code" not in course_columns:
             cursor.execute("ALTER TABLE courses ADD COLUMN catalog_code TEXT")
 
+        cursor.execute("PRAGMA table_info(students)")
+        student_columns = [row[1] for row in cursor.fetchall()]
+        for column in ("internal_marks", "external_marks"):
+            if column not in student_columns:
+                cursor.execute(f"ALTER TABLE students ADD COLUMN {column} REAL")
+
         cursor.execute("PRAGMA table_info(semester_registrations)")
         registration_columns = [row[1] for row in cursor.fetchall()]
         if "section" not in registration_columns:
@@ -4672,6 +5327,38 @@ def upgrade_student_approval_system():
                     ON DELETE CASCADE,
                 FOREIGN KEY(student_id) REFERENCES students(student_id)
                     ON DELETE CASCADE
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS course_assessments (
+                assessment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                registration_id INTEGER NOT NULL,
+                course_id INTEGER NOT NULL,
+                faculty_id INTEGER NOT NULL,
+                assignment_marks REAL CHECK(assignment_marks BETWEEN 0 AND 10),
+                quiz_marks REAL CHECK(quiz_marks BETWEEN 0 AND 10),
+                mid_exam_marks REAL CHECK(mid_exam_marks BETWEEN 0 AND 30),
+                viva_marks REAL CHECK(viva_marks BETWEEN 0 AND 10),
+                external_marks REAL CHECK(external_marks BETWEEN 0 AND 40),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(student_id, registration_id, course_id),
+                FOREIGN KEY(student_id) REFERENCES students(student_id),
+                FOREIGN KEY(registration_id) REFERENCES semester_registrations(registration_id),
+                FOREIGN KEY(course_id) REFERENCES courses(course_id),
+                FOREIGN KEY(faculty_id) REFERENCES faculty(faculty_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS model_training_runs (
+                run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                model_name TEXT NOT NULL,
+                sample_count INTEGER NOT NULL,
+                accuracy REAL,
+                trained_by TEXT,
+                trained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
