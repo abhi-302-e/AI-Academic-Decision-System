@@ -32,12 +32,17 @@ from sms_service import send_academic_update_sms
 
 
 require_faculty()
-faculty = dict(st.session_state.user_data)
+faculty = dict(st.session_state.user_data or {})
+
+if not faculty or "faculty_id" not in faculty:
+    st.info("Please log in as faculty to view this dashboard.")
+    st.stop()
+
 st.title("Faculty Dashboard")
-st.success(f"Welcome {faculty['full_name']}")
+st.success(f"Welcome {faculty.get('full_name', 'Faculty')}")
 
 st.subheader("Request a teaching assignment")
-teachable_courses = get_teachable_course_options(faculty["department"])
+teachable_courses = get_teachable_course_options(faculty.get("department", ""))
 if not teachable_courses:
     st.info("No published courses are available for your department yet.")
 else:

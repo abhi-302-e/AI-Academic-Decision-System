@@ -196,6 +196,7 @@ def require_login():
         st.warning("Please login to continue.")
 
         st.stop()
+        raise SystemExit(0)
 
 
 def require_admin():
@@ -210,6 +211,7 @@ def require_admin():
         st.error("Access Denied! Admin Only.")
 
         st.stop()
+        raise SystemExit(0)
 
 
 def require_faculty():
@@ -224,6 +226,7 @@ def require_faculty():
         st.error("Access Denied! Faculty Only.")
 
         st.stop()
+        raise SystemExit(0)
 
 
 def require_student():
@@ -238,6 +241,7 @@ def require_student():
         st.error("Access Denied! Students Only.")
 
         st.stop()
+        raise SystemExit(0)
 
 
 # ==========================================================

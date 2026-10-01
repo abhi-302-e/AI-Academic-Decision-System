@@ -49,37 +49,17 @@ from models.train_registered_course_models import (
     prepare_training_data,
     train_course_models,
 )
-st.title("🎓 AI-Based Autonomous Academic Decision System")
-
-st.subheader("Administrator Dashboard")
-students = get_all_students()
-
-faculty = get_all_faculty()
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.metric(
-        "Total Students",
-        len(students)
-    )
-
-with col2:
-    st.metric(
-        "Total Faculty",
-        len(faculty)
-    )
-
-
 # ==========================================================
 # LOGIN CHECK
 # ==========================================================
 
 require_admin()
 
-admin = dict(st.session_state.user_data)
+admin = dict(st.session_state.user_data or {})
 
-
+if not admin:
+    st.info("Please log in as an administrator to view this dashboard.")
+    st.stop()
 
 # ==========================================================
 # HEADER
@@ -87,7 +67,7 @@ admin = dict(st.session_state.user_data)
 
 st.title("🛡️ Admin Dashboard")
 
-st.success(f"Welcome {admin['full_name']}")
+st.success(f"Welcome {admin.get('full_name', 'Administrator')}")
 
 st.divider()
 

@@ -12,12 +12,16 @@ Description:
 
 from pathlib import Path
 import sqlite3
-from tkinter import Menu
 import bcrypt
 import pandas as pd
 import streamlit as st
 import openpyxl
 from datetime import datetime
+
+BASE_DIR = Path(__file__).resolve().parent
+DATABASE_DIR = BASE_DIR / "dataset"
+DATABASE_DIR.mkdir(exist_ok=True)
+DATABASE_PATH = DATABASE_DIR / "student.db"
 
 
 # ==========================================================
@@ -5767,21 +5771,14 @@ def reset_database():
     """
 
     connection = get_connection()
-
     cursor = connection.cursor()
+    existing_tables = {r[0] for r in cursor.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
 
-    cursor.execute("DELETE FROM recommendations")
-
-    cursor.execute("DELETE FROM attendance")
-
-    cursor.execute("DELETE FROM marks")
-
-    cursor.execute("DELETE FROM students")
-
-    cursor.execute("DELETE FROM faculty")
+    for table in ["recommendations", "attendance", "marks", "students", "faculty"]:
+        if table in existing_tables:
+            cursor.execute(f"DELETE FROM {table}")
 
     connection.commit()
-
     connection.close()
 
 

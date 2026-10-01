@@ -17,39 +17,18 @@ if str(ROOT_DIR) not in sys.path:
 # DATABASE
 # =========================================================
 
+from auth import require_admin
 from database import (
     get_pending_student_applications,
     approve_student,
     reject_student
 )
 
-
-# =========================================================
-# PAGE CONFIG
-# =========================================================
-
-
 # =========================================================
 # ADMIN SECURITY
 # =========================================================
 
-if "user" not in st.session_state:
-
-    st.error("Please login first.")
-
-    if st.button("Go to Login"):
-        st.switch_page("dashboard/login.py")
-
-    st.stop()
-
-
-if st.session_state.get("role") != "Admin":
-
-    st.error(
-        "Access denied. Only administrators can access Student Approvals."
-    )
-
-    st.stop()
+require_admin()
 
 
 # =========================================================

@@ -27,10 +27,15 @@ from recommendation_engine import generate_recommendation
 
 
 require_student()
-session_student = dict(st.session_state.user_data)
-student = get_student_by_roll(session_student["roll_number"]) or session_student
+session_student = dict(st.session_state.user_data or {})
+roll_no = session_student.get("roll_number")
+student = (get_student_by_roll(roll_no) if roll_no else None) or session_student
 st.session_state.user_data = student
 st.session_state.user = student
+
+if not student or "student_id" not in student:
+    st.info("Please log in as a student to view this dashboard.")
+    st.stop()
 
 attendance = float(student.get("attendance_percentage") or 0)
 cgpa = student.get("cgpa")

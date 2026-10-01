@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT_DIR))
 
+from auth import require_admin
 from database import (
     get_connection,
     create_semester_structure,
@@ -16,6 +17,7 @@ from database import (
 )
 from preprocessing.academic_schedule_import import parse_academic_workbooks
 
+require_admin()
 
 st.title("📚 Course & Semester Structure Management")
 st.subheader("Import academic courses and timetable")
