@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 from database import (
     initialize_database,
     upgrade_student_registration_system,

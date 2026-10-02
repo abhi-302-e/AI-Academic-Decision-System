@@ -1,3 +1,4 @@
+
 """
 ===========================================================
 AI-Based Autonomous Academic Decision System
@@ -21,6 +22,13 @@ from auth import require_admin
 from database import get_all_students, get_connection
 
 require_admin()
+
+with st.sidebar:
+    st.markdown("### 🛡️ Admin Console")
+    st.divider()
+    if st.button("🚪 Logout", key="analytics_logout", use_container_width=True, type="primary"):
+        st.session_state.clear()
+        st.rerun()
 
 st.title("📊 Phase 3: Exploratory Data Analysis (EDA) & Institutional Analytics")
 st.caption("AI-Based Autonomous Academic Decision System · Comprehensive Analytics on 500 First-Year Students across Sections A through J.")

@@ -36,8 +36,57 @@ from database import (
     ACADEMIC_DAYS,
     ACADEMIC_PERIODS,
 )
-from prediction import predict_student_comprehensive, are_course_models_trained
+from prediction import (
+    predict_student_comprehensive,
+    are_course_models_trained,
+    get_latest_model_evaluation,
+)
 from recommendation_engine import generate_course_level_recommendations, generate_recommendation
+
+
+def render_student_confusion_matrix_section(eval_data, model_type="performance"):
+    """Render interactive confusion matrix and classification report in student portal."""
+    if not eval_data:
+        return
+
+    if model_type == "performance":
+        title = "🎯 Course Performance Confusion Matrix (Distinction / Pass / Fail)"
+        cm_data = eval_data.get("performance_confusion_matrix", {})
+        report_data = eval_data.get("performance_report", {})
+        acc = eval_data.get("performance_accuracy", 0.0)
+    else:
+        title = "🚨 Academic Risk Classification Confusion Matrix (Low / Medium / High)"
+        cm_data = eval_data.get("risk_confusion_matrix", {})
+        report_data = eval_data.get("risk_report", {})
+        acc = eval_data.get("risk_accuracy", 0.0)
+
+    matrix = cm_data.get("matrix", [])
+    labels = cm_data.get("labels", [])
+
+    st.markdown(f"###### {title}")
+    st.caption(f"Stratified Holdout Evaluation Accuracy: **{acc:.1%}**")
+
+    if matrix and labels:
+        col_names = [f"Pred {lbl}" for lbl in labels]
+        row_names = [f"Actual {lbl}" for lbl in labels]
+        cm_df = pd.DataFrame(matrix, index=row_names, columns=col_names)
+        st.dataframe(cm_df, use_container_width=True)
+
+        if report_data:
+            rep_rows = []
+            for lbl in labels:
+                if lbl in report_data:
+                    m = report_data[lbl]
+                    rep_rows.append({
+                        "Class Category": lbl,
+                        "Precision": f"{m.get('precision', 0):.1%}",
+                        "Recall (Sensitivity)": f"{m.get('recall', 0):.1%}",
+                        "F1-Score": f"{m.get('f1-score', 0):.3f}",
+                        "Test Support": int(m.get('support', 0)),
+                    })
+            if rep_rows:
+                st.dataframe(pd.DataFrame(rep_rows), use_container_width=True, hide_index=True)
+
 
 require_student()
 
@@ -121,6 +170,16 @@ with nav_col2:
         st.info(f"🔔 {unread_count} unread notifications")
 with nav_col3:
     if st.button("Log out of portal", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
+
+with st.sidebar:
+    st.markdown("### 🎓 Student Workspace")
+    st.write(f"**{full_name}**")
+    st.caption(f"Roll No: `{roll_number}`")
+    st.caption(f"Dept: {department}")
+    st.divider()
+    if st.button("🚪 Logout", key="student_sidebar_logout", use_container_width=True, type="primary"):
         st.session_state.clear()
         st.rerun()
 
@@ -237,6 +296,9 @@ policy_att_thresh = float(academic_policies.get("attendance_threshold", 75.0))
 policy_crit_int = float(academic_policies.get("critical_internal_threshold", 24.0))
 
 comprehensive_pred = predict_student_comprehensive(student_id, current_semester)
+latest_eval = comprehensive_pred.get("model_evaluation") or get_latest_model_evaluation()
+active_algo = academic_policies.get("active_ml_algorithm") or (latest_eval.get("algorithm") if latest_eval else "Random Forest")
+policy_crit_score = float(latest_eval.get("critical_score", 40.0)) if latest_eval else 40.0
 
 total_credits = sum(float(c.get("credits") or 0) for c in registered_courses) if registered_courses else 20.0
 overall_attendance = float(student.get("attendance_percentage") or 0.0)
@@ -375,13 +437,13 @@ with overview_tab:
     with col_highlights:
         st.markdown("### 📈 Academic Health & Examination Eligibility")
         with st.container(border=True):
-            if overall_attendance >= 75.0:
+            if overall_attendance >= policy_att_thresh:
                 st.markdown(
                     f"""
                     <div class="statutory-success-box">
                         <h4 style="color: #166534; margin: 0 0 0.4rem 0;">✅ Statutory Exam Eligibility: COMPLIANT</h4>
                         <p style="margin: 0; font-size: 0.88rem; color: #14532d;">
-                            Your current attendance is <b>{overall_attendance:.1f}%</b>, exceeding the UGC and institutional mandatory threshold of 75.0%.
+                            Your current attendance is <b>{overall_attendance:.1f}%</b>, exceeding the institutional mandatory threshold of {policy_att_thresh:.0f}%.
                             You are in good standing to appear for the End-Semester External Examinations.
                         </p>
                     </div>
@@ -394,7 +456,7 @@ with overview_tab:
                     <div class="statutory-alert-box">
                         <h4 style="color: #991b1b; margin: 0 0 0.4rem 0;">⚠️ Statutory Exam Eligibility: SHORTAGE ALERT</h4>
                         <p style="margin: 0; font-size: 0.88rem; color: #7f1d1d;">
-                            Your attendance is <b>{overall_attendance:.1f}%</b> (below 75.0% mandatory minimum).
+                            Your attendance is <b>{overall_attendance:.1f}%</b> (below the institutional {policy_att_thresh:.0f}% statutory minimum).
                             As per university regulations, you are at risk of being condoned or barred from End-Semester examinations unless class attendance is improved immediately.
                         </p>
                     </div>
@@ -626,14 +688,17 @@ with timetable_tab:
 
     st.divider()
     st.subheader("Course-Wise Session Attendance Ledger")
-    st.caption("UGC & Institutional Mandate: Minimum 75% attendance in each course is required to be eligible for End-Semester Examinations.")
+    st.caption(f"Institutional Mandate: Minimum {policy_att_thresh:.0f}% attendance in each course is required to be eligible for End-Semester Examinations.")
 
     if course_assessments:
         att_rows = []
         shortage_alerts = []
         for ca in course_assessments:
             att = float(ca.get("course_attendance") or overall_attendance or 0.0)
-            status_badge = "✅ Eligible (≥85%)" if att >= 85.0 else ("🟡 Marginal (75–84%)" if att >= 75.0 else "🔴 SHORTAGE (<75%)")
+            status_badge = (
+                "✅ Eligible (≥85%)" if att >= 85.0
+                else (f"🟡 Marginal ({policy_att_thresh:.0f}–84%)" if att >= policy_att_thresh else f"🔴 SHORTAGE (<{policy_att_thresh:.0f}%)")
+            )
             att_rows.append({
                 "Course Code": ca["course_code"],
                 "Course Name": ca["course_name"],
@@ -641,18 +706,18 @@ with timetable_tab:
                 "Attendance %": f"{att:.1f}%",
                 "Regulatory Status": status_badge,
             })
-            if att < 75.0:
+            if att < policy_att_thresh:
                 shortage_alerts.append((ca["course_code"], ca["course_name"], att))
 
         st.dataframe(pd.DataFrame(att_rows), use_container_width=True, hide_index=True)
 
         if shortage_alerts:
             st.markdown(
-                """
+                f"""
                 <div class="statutory-alert-box">
                     <h4 style="color: #b91c1c; margin-top: 0;">⚠️ MANDATORY ATTENDANCE SHORTAGE ADVISORY</h4>
                     <p style="font-size: 0.9rem; margin-bottom: 0.5rem;">
-                        You currently have attendance shortages below the 75% statutory requirement in the following courses:
+                        You currently have attendance shortages below the {policy_att_thresh:.0f}% statutory requirement in the following courses:
                     </p>
                     <ul style="font-size: 0.9rem; margin-bottom: 0;">
                 """,
@@ -665,7 +730,7 @@ with timetable_tab:
                 )
             st.markdown("</ul></div>", unsafe_allow_html=True)
         else:
-            st.success("🎉 All enrolled courses comply with the university 75% attendance regulation!")
+            st.success(f"🎉 All enrolled courses comply with the university {policy_att_thresh:.0f}% attendance regulation!")
 
 # =============================================================
 # TAB 5: AI ACADEMIC DECISION ENGINE (Multi-Dataset Synthesis)
@@ -694,7 +759,29 @@ with ai_engine_tab:
         st.warning("⚠️ **Notice from Academic Administration**: Real-time AI Performance Forecasts and Risk Radars are temporarily paused while Academic Administration is retraining and calibrating institutional machine learning models.")
     else:
         # Active Model Status Card
-        if latest_model_run:
+        if latest_eval:
+            with st.container(border=True):
+                mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+                mcol1.metric("Active Model", f"{latest_eval.get('algorithm', 'Ensemble ML')}")
+                s_perf_acc = float(latest_eval.get("performance_accuracy") or 0.974) * 100
+                mcol2.metric("Performance Accuracy", f"{s_perf_acc:.1f}%")
+                s_risk_acc = float(latest_eval.get("risk_accuracy") or 0.990) * 100
+                mcol3.metric("Risk Detection Accuracy", f"{s_risk_acc:.1f}%")
+                mcol4.metric("Dataset Records Trained", f"{latest_eval.get('samples', 4000):,} Records")
+                st.caption(f"Trained by Admin: **{latest_eval.get('trained_by', 'Administrator')}** at {latest_eval.get('trained_at', 'Recently')} · Test Split: {int(float(latest_eval.get('test_size', 0.2))*100)}% Holdout")
+
+                st.markdown(
+                    f"""
+                    <div style="background: #f8fafc; border-left: 4px solid #2563eb; padding: 0.6rem 0.85rem; margin-top: 0.5rem; font-size: 0.85rem; color: #1e293b; border-radius: 4px;">
+                        <b>🏛️ Institutional Directives Configured by Admin:</b>
+                        Statutory Attendance Minimum: <b>≥ {policy_att_thresh:.0f}%</b> &nbsp;|&nbsp;
+                        Passing Marks Cutoff: <b>≥ {policy_crit_score:.0f} / 100</b> &nbsp;|&nbsp;
+                        Critical CIE Internal: <b>≥ {policy_crit_int:.0f} / 60</b>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        elif latest_model_run:
             with st.container(border=True):
                 mcol1, mcol2, mcol3, mcol4 = st.columns(4)
                 mcol1.metric("Active Model Version", f"Run #{latest_model_run.get('run_id', 1)}")
@@ -703,10 +790,27 @@ with ai_engine_tab:
                 s_risk_acc = (latest_model_run.get("risk_accuracy") or latest_model_run.get("accuracy") or 0.990) * 100
                 mcol3.metric("Risk Detection Accuracy", f"{s_risk_acc:.1f}%")
                 mcol4.metric("Dataset Records Trained", f"{latest_model_run.get('training_records', latest_model_run.get('sample_count', 4000)):,} Records")
-                st.caption(f"Model: {latest_model_run.get('model_name', 'Ensemble ML')} · Stratified Train-Test Evaluation · Trained by Admin: {latest_model_run.get('trained_at', 'Recently')}")
-
+                st.caption(f"Model: {latest_model_run.get('model_name', 'Ensemble ML')} · Trained by Admin: {latest_model_run.get('trained_at', 'Recently')}")
         else:
             st.warning("Admin has not trained the multi-dataset ML models yet. Using baseline decision engine.")
+
+        # Active Model Confusion Matrices Section
+        if latest_eval:
+            st.markdown("### 🧮 Admin-Trained ML Confusion Matrices & Reliability")
+            st.caption(
+                f"Evaluation metrics for **{latest_eval.get('algorithm', 'Active Model')}** trained on "
+                f"**{latest_eval.get('samples', 4000):,}** records by **{latest_eval.get('trained_by', 'Admin')}** "
+                f"with Attendance Cutoff ≥ **{policy_att_thresh:.0f}%** and Passing Cutoff ≥ **{policy_crit_score:.0f}**."
+            )
+            with st.expander("📊 View Interactive Confusion Matrices & Classification Reports", expanded=True):
+                cm_col1, cm_col2 = st.columns(2)
+                with cm_col1:
+                    render_student_confusion_matrix_section(latest_eval, model_type="performance")
+                with cm_col2:
+                    render_student_confusion_matrix_section(latest_eval, model_type="risk")
+                st.info(
+                    "💡 **Dynamic Recalibration Guarantee:** Whenever the Academic Administrator changes attendance criteria, passing marks cutoffs, or classifier models in the Admin Portal, the models retrain and update these matrices. The updated model directly recalculates your predicted results, risk radar, and action recommendations."
+                )
 
         # Overall Prediction Showcase
         pred_card_col1, pred_card_col2 = st.columns(2)
@@ -743,7 +847,7 @@ with ai_engine_tab:
                     """,
                     unsafe_allow_html=True,
                 )
-                st.write("Synthesized from course attendance regularity, CIE continuous mastery, and OULAD submission engagement.")
+                st.write(f"Synthesized from course attendance regularity (Cutoff: {policy_att_thresh:.0f}%), CIE continuous evaluation, and LMS activity.")
 
         st.markdown("### 📊 Course-Level AI Predictions (Autonomous ML)")
         course_predictions = comprehensive_pred.get("course_predictions", [])
@@ -753,14 +857,25 @@ with ai_engine_tab:
                 c_risk = cp.get("risk_level") or cp.get("predicted_risk", "Low")
                 c_perf = cp.get("performance_prediction") or cp.get("predicted_performance", "Pass")
                 r_icon = "🟢" if c_risk == "Low" else ("🟡" if c_risk == "Medium" else "🔴")
+                c_att = float(cp.get("course_attendance") or 0.0)
+                c_int = float(cp.get("internal_total") or 0.0)
+
+                flags = []
+                if c_att < policy_att_thresh:
+                    flags.append(f"Att < {policy_att_thresh:.0f}%")
+                if c_int < policy_crit_int:
+                    flags.append(f"CIE < {policy_crit_int:.0f}/60")
+                flag_str = " · ".join(flags) if flags else "Compliant"
+
                 pred_table.append({
                     "Course Code": cp.get("course_code", "—"),
                     "Course Title": cp.get("course_name", "—"),
-                    "Internal /60": f"{float(cp.get('internal_total') or 0):.1f}",
+                    "Internal /60": f"{c_int:.1f}",
                     "External /40": f"{float(cp.get('external_marks') or 0):.1f}",
-                    "Attendance %": f"{float(cp.get('course_attendance') or 0):.1f}%",
+                    "Attendance %": f"{c_att:.1f}%",
                     "Predicted Result": c_perf,
                     "Risk Classification": f"{r_icon} {c_risk}",
+                    "Admin Policy Status": flag_str,
                 })
             st.dataframe(pd.DataFrame(pred_table), use_container_width=True, hide_index=True)
         else:
@@ -788,12 +903,29 @@ with rec_tab:
     st.subheader("AI-Generated Academic Interventions & Recommendations")
     st.caption("Personalized action plans generated by the Decision Engine to enhance GPA and mitigate academic risk.")
 
+    # Admin Policy Directives Banner
+    st.markdown(
+        f"""
+        <div style="background: #f8fafc; border-left: 4px solid #0d9488; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.88rem; color: #0f172a; border: 1px solid #e2e8f0;">
+            <b>🏛️ Institutional Directives Applied by Admin:</b>
+            Statutory Attendance Gate: <b>≥ {policy_att_thresh:.0f}%</b> &nbsp;|&nbsp;
+            Passing Cutoff: <b>≥ {policy_crit_score:.0f} / 100</b> &nbsp;|&nbsp;
+            Critical CIE Internal: <b>≥ {policy_crit_int:.0f} / 60</b> &nbsp;|&nbsp;
+            Active Classifier: <b>{active_algo}</b>
+            <div style="font-size: 0.8rem; color: #475569; margin-top: 0.25rem;">
+                All high-priority advisories and course action items below are dynamically generated against these Admin-trained thresholds.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # High Priority Action Items
     urgent_actions = []
     if overall_attendance < policy_att_thresh:
-        urgent_actions.append(f"🚨 **Urgent Attendance Remediation:** Your attendance ({overall_attendance:.1f}%) is below the statutory {policy_att_thresh:.0f}% limit. Meet your academic mentor and attend all scheduled classes.")
+        urgent_actions.append(f"🚨 **Urgent Attendance Remediation:** Your attendance ({overall_attendance:.1f}%) is below the statutory {policy_att_thresh:.0f}% limit trained by Academic Administration. Regularize attendance immediately to secure examination eligibility.")
     if avg_internal is not None and avg_internal < policy_crit_int:
-        urgent_actions.append(f"🚨 **CIE Improvement Plan:** Your average internal score ({avg_internal:.1f}/60) is below the institutional satisfactory threshold ({policy_crit_int:.0f}/60). Register for departmental remedial tutorials.")
+        urgent_actions.append(f"🚨 **CIE Improvement Plan:** Your average internal score ({avg_internal:.1f}/60) is below the institutional satisfactory threshold ({policy_crit_int:.0f}/60) set by Admin. Register for departmental remedial tutorials.")
 
     if urgent_actions:
         with st.container(border=True):
@@ -837,7 +969,7 @@ with rec_tab:
             **Assigned Faculty Advisor / Mentor:** Dr. D. Krishna Madhuri (Associate Professor, CSE/AI)  
             **Office:** Room #312, Academic Block B  
             **Advisory Hours:** Monday & Wednesday, 03:40 PM – 04:30 PM (Period 7)  
-            **Remedial Support:** Weekly tutorial sessions are conducted every Saturday for courses with internal scores < 24/60.
+            **Remedial Support:** Weekly tutorial sessions are conducted every Saturday for courses with internal scores < {policy_crit_int:.0f}/60.
             """
         )
 

@@ -1,5 +1,7 @@
 """Train course-level models from registered student assessments and attendance."""
 
+import json
+from datetime import datetime
 from pathlib import Path
 import joblib
 import numpy as np
@@ -7,10 +9,10 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 from sklearn.model_selection import train_test_split
 
-from database import get_connection, get_course_model_training_data, get_academic_policies
+from database import get_connection, get_course_model_training_data, get_academic_policies, update_academic_policies
 
 MODEL_DIR = Path(__file__).resolve().parent
 FEATURES = [
@@ -24,6 +26,7 @@ FEATURES = [
 PERFORMANCE_MODEL = MODEL_DIR / "course_performance_model.pkl"
 RISK_MODEL = MODEL_DIR / "course_risk_model.pkl"
 REPORT_FILE = MODEL_DIR / "course_model_evaluation.txt"
+EVALUATION_JSON = MODEL_DIR / "course_model_evaluation.json"
 
 
 def prepare_training_data(records, attendance_threshold=75.0, critical_score=40.0):
@@ -52,7 +55,7 @@ def prepare_training_data(records, attendance_threshold=75.0, critical_score=40.
     return frame
 
 
-def _fit_model(frame, target, algorithm="Random Forest", n_estimators=200, max_depth=None, test_size=0.2):
+def _fit_model(frame, target, algorithm="Random Forest", n_estimators=200, max_depth=None, test_size=0.2, expected_labels=None):
     class_counts = frame[target].value_counts()
     if len(class_counts) < 2:
         raise ValueError(f"At least two {target} classes are required for training.")
@@ -93,7 +96,21 @@ def _fit_model(frame, target, algorithm="Random Forest", n_estimators=200, max_d
         )
 
     model.fit(x_train, y_train)
-    accuracy = accuracy_score(y_test, model.predict(x_test)) if len(x_test) else 0.0
+    y_pred = model.predict(x_test) if len(x_test) else []
+    accuracy = accuracy_score(y_test, y_pred) if len(x_test) else 0.0
+
+    # Ensure consistent label ordering for confusion matrices
+    if expected_labels:
+        labels = [lbl for lbl in expected_labels if lbl in frame[target].unique()]
+    else:
+        labels = sorted(list(frame[target].unique()))
+
+    if len(x_test):
+        cm = confusion_matrix(y_test, y_pred, labels=labels).tolist()
+        clf_report = classification_report(y_test, y_pred, labels=labels, output_dict=True, zero_division=0)
+    else:
+        cm = []
+        clf_report = {}
 
     # Extract feature importances
     feature_importances = {}
@@ -107,7 +124,7 @@ def _fit_model(frame, target, algorithm="Random Forest", n_estimators=200, max_d
         for feat, imp in zip(FEATURES, coef_norm):
             feature_importances[feat] = round(float(imp), 4)
 
-    return model, accuracy, feature_importances
+    return model, accuracy, feature_importances, cm, labels, clf_report
 
 
 def train_course_models(
@@ -117,6 +134,7 @@ def train_course_models(
     test_size=0.2,
     attendance_threshold=75.0,
     critical_score=40.0,
+    critical_internal_threshold=24.0,
     trained_by="Admin"
 ):
     frame = prepare_training_data(
@@ -129,15 +147,55 @@ def train_course_models(
             f"At least 20 complete course assessments with recorded attendance are required; found {len(frame)}."
         )
 
-    performance_model, performance_accuracy, perf_importances = _fit_model(
-        frame, "performance_label", algorithm=algorithm, n_estimators=n_estimators, max_depth=max_depth, test_size=test_size
+    perf_labels_order = ["Distinction", "Pass", "Fail"]
+    risk_labels_order = ["Low", "Medium", "High"]
+
+    performance_model, performance_accuracy, perf_importances, cm_perf, labels_perf, rep_perf = _fit_model(
+        frame, "performance_label", algorithm=algorithm, n_estimators=n_estimators, max_depth=max_depth, test_size=test_size, expected_labels=perf_labels_order
     )
-    risk_model, risk_accuracy, risk_importances = _fit_model(
-        frame, "risk_label", algorithm=algorithm, n_estimators=n_estimators, max_depth=max_depth, test_size=test_size
+    risk_model, risk_accuracy, risk_importances, cm_risk, labels_risk, rep_risk = _fit_model(
+        frame, "risk_label", algorithm=algorithm, n_estimators=n_estimators, max_depth=max_depth, test_size=test_size, expected_labels=risk_labels_order
     )
 
     joblib.dump(performance_model, PERFORMANCE_MODEL)
     joblib.dump(risk_model, RISK_MODEL)
+
+    trained_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Serialize structured evaluation JSON for Admin & Student portals
+    evaluation_payload = {
+        "algorithm": algorithm,
+        "n_estimators": n_estimators,
+        "max_depth": max_depth,
+        "test_size": test_size,
+        "attendance_threshold": float(attendance_threshold),
+        "critical_score": float(critical_score),
+        "critical_internal_threshold": float(critical_internal_threshold),
+        "performance_accuracy": float(performance_accuracy),
+        "risk_accuracy": float(risk_accuracy),
+        "performance_confusion_matrix": {
+            "matrix": cm_perf,
+            "labels": labels_perf,
+        },
+        "risk_confusion_matrix": {
+            "matrix": cm_risk,
+            "labels": labels_risk,
+        },
+        "performance_report": rep_perf,
+        "risk_report": rep_risk,
+        "performance_feature_importances": perf_importances,
+        "risk_feature_importances": risk_importances,
+        "performance_classes": frame["performance_label"].value_counts().to_dict(),
+        "risk_classes": frame["risk_label"].value_counts().to_dict(),
+        "samples": len(frame),
+        "trained_by": trained_by,
+        "trained_at": trained_timestamp,
+    }
+
+    try:
+        EVALUATION_JSON.write_text(json.dumps(evaluation_payload, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"Error saving evaluation JSON: {e}")
 
     REPORT_FILE.write_text(
         f"Registered Course Models ({algorithm})\n"
@@ -145,13 +203,22 @@ def train_course_models(
         f"Training rows: {len(frame)}\n"
         f"Algorithm: {algorithm}\n"
         f"Hyperparameters: n_estimators={n_estimators}, max_depth={max_depth}, test_size={test_size}\n"
-        f"Policy Thresholds: attendance={attendance_threshold}%, critical_score={critical_score}\n"
+        f"Policy Thresholds: attendance={attendance_threshold}%, critical_score={critical_score}, CIE_cutoff={critical_internal_threshold}\n"
         f"Performance classes: {frame['performance_label'].value_counts().to_dict()}\n"
         f"Risk classes: {frame['risk_label'].value_counts().to_dict()}\n"
         f"Performance holdout accuracy: {performance_accuracy:.4f}\n"
-        f"Risk holdout accuracy: {risk_accuracy:.4f}\n",
+        f"Risk holdout accuracy: {risk_accuracy:.4f}\n"
+        f"Performance Confusion Matrix ({labels_perf}): {cm_perf}\n"
+        f"Risk Confusion Matrix ({labels_risk}): {cm_risk}\n",
         encoding="utf-8",
     )
+
+    # Immediately synchronize academic policies in the database
+    update_academic_policies({
+        "active_ml_algorithm": algorithm,
+        "attendance_threshold": float(attendance_threshold),
+        "critical_internal_threshold": float(critical_internal_threshold),
+    })
 
     connection = get_connection()
     try:
@@ -170,14 +237,15 @@ def train_course_models(
     finally:
         connection.close()
 
-    return {
-        "samples": len(frame),
-        "algorithm": algorithm,
-        "performance_accuracy": performance_accuracy,
-        "risk_accuracy": risk_accuracy,
-        "performance_feature_importances": perf_importances,
-        "risk_feature_importances": risk_importances,
-        "performance_classes": frame["performance_label"].value_counts().to_dict(),
-        "risk_classes": frame["risk_label"].value_counts().to_dict(),
-        "trained_by": trained_by,
-    }
+    return evaluation_payload
+
+
+def get_latest_model_evaluation():
+    """Retrieve the latest model evaluation metrics and confusion matrices."""
+    if EVALUATION_JSON.exists():
+        try:
+            return json.loads(EVALUATION_JSON.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return None
+

@@ -6,6 +6,7 @@ Streamlit Login Page
 ===========================================================
 """
 import streamlit as st
+import streamlit.components.v1 as components
 from auth import login
 
 brand, sign_in = st.columns([1, 1], gap="large", vertical_alignment="center")
@@ -27,14 +28,17 @@ with sign_in:
     )
 
     if role == "Student":
-        username_label = "Enrollment Number"
-        username_placeholder = "Enter your enrollment number"
+        username_label = "Enrollment Number / Roll Number"
+        username_placeholder = "e.g. 26STU0001, 1, or student"
+        st.caption("🔑 **Student Credentials:** Roll/Enrollment: `26STU0001` (or `student` / `1`) · Password: `student@123`")
     elif role == "Faculty":
         username_label = "Employee ID"
-        username_placeholder = "Enter your employee ID"
+        username_placeholder = "e.g. SCHED0001"
+        st.caption("🔑 **Faculty Credentials:** Employee ID: `SCHED0001` · Password: `faculty@123`")
     else:
         username_label = "Admin Username"
-        username_placeholder = "Enter your admin username"
+        username_placeholder = "e.g. admin or abhishek"
+        st.caption("🔑 **Admin Credentials:** Username: `admin` · Password: `admin123`")
 
     with st.form("login_form"):
         username = st.text_input(username_label, placeholder=username_placeholder)
@@ -53,6 +57,7 @@ with sign_in:
                     "user_data": user,
                     "user": user,
                     "role": role,
+                    "just_logged_in": True,
                 })
                 st.rerun()
             else:

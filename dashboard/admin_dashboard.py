@@ -58,6 +58,7 @@ from database import (
 from models.train_registered_course_models import (
     prepare_training_data,
     train_course_models,
+    get_latest_model_evaluation,
 )
 from prediction import (
     predict_student_comprehensive,
@@ -65,6 +66,50 @@ from prediction import (
     are_course_models_trained,
 )
 from recommendation_engine import generate_course_level_recommendations
+
+
+def render_confusion_matrix_section(eval_data, model_type="performance"):
+    """Render interactive confusion matrix and classification report."""
+    if not eval_data:
+        return
+
+    if model_type == "performance":
+        title = "🎯 Course Performance Confusion Matrix (Distinction / Pass / Fail)"
+        cm_data = eval_data.get("performance_confusion_matrix", {})
+        report_data = eval_data.get("performance_report", {})
+        acc = eval_data.get("performance_accuracy", 0.0)
+    else:
+        title = "🚨 Academic Risk Classification Confusion Matrix (Low / Medium / High)"
+        cm_data = eval_data.get("risk_confusion_matrix", {})
+        report_data = eval_data.get("risk_report", {})
+        acc = eval_data.get("risk_accuracy", 0.0)
+
+    matrix = cm_data.get("matrix", [])
+    labels = cm_data.get("labels", [])
+
+    st.markdown(f"###### {title}")
+    st.caption(f"Stratified Holdout Accuracy: **{acc:.1%}**")
+
+    if matrix and labels:
+        col_names = [f"Pred {lbl}" for lbl in labels]
+        row_names = [f"Actual {lbl}" for lbl in labels]
+        cm_df = pd.DataFrame(matrix, index=row_names, columns=col_names)
+        st.dataframe(cm_df, use_container_width=True)
+
+        if report_data:
+            rep_rows = []
+            for lbl in labels:
+                if lbl in report_data:
+                    m = report_data[lbl]
+                    rep_rows.append({
+                        "Class Category": lbl,
+                        "Precision": f"{m.get('precision', 0):.1%}",
+                        "Recall (Sensitivity)": f"{m.get('recall', 0):.1%}",
+                        "F1-Score": f"{m.get('f1-score', 0):.3f}",
+                        "Test Support": int(m.get('support', 0)),
+                    })
+            if rep_rows:
+                st.dataframe(pd.DataFrame(rep_rows), use_container_width=True, hide_index=True)
 
 # ==========================================================
 # LOGIN CHECK
@@ -270,8 +315,39 @@ elif menu == "Train ML Models":
                 sel_split_str = st.selectbox("Train-Test Holdout Split", split_choices, index=0)
                 test_size_val = 0.2 if "80/20" in sel_split_str else (0.15 if "85/15" in sel_split_str else (0.25 if "75/25" in sel_split_str else 0.30))
 
+            st.markdown("##### 📏 Institutional Governance Thresholds for Model Training")
+            tc_att, tc_crit, tc_cie = st.columns(3)
+            with tc_att:
+                train_att_thresh = st.slider(
+                    "Attendance Cutoff (%)",
+                    min_value=60.0,
+                    max_value=90.0,
+                    value=active_att_thresh,
+                    step=1.0,
+                    help="Statutory minimum attendance percentage for eligibility.",
+                )
+            with tc_crit:
+                train_crit_score = st.slider(
+                    "Passing Marks Cutoff (/100)",
+                    min_value=30.0,
+                    max_value=60.0,
+                    value=40.0,
+                    step=1.0,
+                    help="Overall course score required to pass (CIE + External).",
+                )
+            with tc_cie:
+                train_cie_thresh = st.slider(
+                    "Critical CIE Internal (/60)",
+                    min_value=15.0,
+                    max_value=35.0,
+                    value=active_crit_int,
+                    step=1.0,
+                    help="Minimum internal assessment total required to avoid remedial action.",
+                )
+
             st.info(
-                f"ℹ️ **Current Institutional Policy Labels Applied:** Attendance Cutoff: **{active_att_thresh:.0f}%** · Course Passing Cutoff: **40.0/100** (CIE 24 + External 16). Model predictions immediately deploy to student & faculty dashboards upon completion."
+                f"ℹ️ **Applied Training Gates:** Attendance Cutoff: **{train_att_thresh:.0f}%** · Passing Marks: **{train_crit_score:.0f}/100** · Critical CIE: **{train_cie_thresh:.0f}/60**. "
+                "Retraining immediately re-calculates all student predictions, risk radar tiers, and recommendations on student and faculty portals."
             )
 
             if st.button("🚀 Train & Deploy Academic Intelligence Models Now", type="primary", use_container_width=True):
@@ -283,29 +359,38 @@ elif menu == "Train ML Models":
                             n_estimators=n_trees,
                             max_depth=max_depth_val,
                             test_size=test_size_val,
-                            attendance_threshold=active_att_thresh,
-                            critical_score=40.0,
+                            attendance_threshold=train_att_thresh,
+                            critical_score=train_crit_score,
+                            critical_internal_threshold=train_cie_thresh,
                             trained_by=admin_name,
                         )
-                        update_academic_policies({"active_ml_algorithm": selected_algo})
-                        st.success(f"✅ Successfully trained and serialized {selected_algo} models using {result['samples']} verified course records!")
-                        
-                        mcol1, mcol2 = st.columns(2)
-                        with mcol1:
-                            st.metric("New Performance Holdout Accuracy", f"{result['performance_accuracy']:.1%}")
-                            st.write("**Top Performance Predictors (Feature Importance):**")
-                            for feat, imp in result.get("performance_feature_importances", {}).items():
-                                st.caption(f"• {feat.replace('_', ' ').title()}: {imp:.1%}")
-                                st.progress(min(max(imp, 0.0), 1.0))
-                        with mcol2:
-                            st.metric("New Risk Detection Holdout Accuracy", f"{result['risk_accuracy']:.1%}")
-                            st.write("**Top Risk Predictors (Feature Importance):**")
-                            for feat, imp in result.get("risk_feature_importances", {}).items():
-                                st.caption(f"• {feat.replace('_', ' ').title()}: {imp:.1%}")
-                                st.progress(min(max(imp, 0.0), 1.0))
+                        update_academic_policies({
+                            "active_ml_algorithm": selected_algo,
+                            "attendance_threshold": train_att_thresh,
+                            "critical_internal_threshold": train_cie_thresh,
+                        })
+                        st.success(
+                            f"✅ Successfully trained and deployed {selected_algo} models! "
+                            f"Student dashboard predictions, risk radars, and recommendations have been recalculated with Attendance Cutoff: {train_att_thresh:.0f}% and Passing Cutoff: {train_crit_score:.0f}."
+                        )
                         st.rerun()
                     except Exception as error:
                         st.error(f"Training error: {error}")
+
+        # Active Model Confusion Matrices
+        latest_eval = get_latest_model_evaluation()
+        if latest_eval:
+            st.markdown("##### 🧮 Active Model Confusion Matrices & Classification Evaluation")
+            st.caption(
+                f"Evaluation metrics for **{latest_eval.get('algorithm', 'Active Model')}** trained on "
+                f"**{latest_eval.get('samples', 4000):,}** records by **{latest_eval.get('trained_by', 'Admin')}** "
+                f"at {latest_eval.get('trained_at', 'Recently')}."
+            )
+            cm_col1, cm_col2 = st.columns(2)
+            with cm_col1:
+                render_confusion_matrix_section(latest_eval, model_type="performance")
+            with cm_col2:
+                render_confusion_matrix_section(latest_eval, model_type="risk")
 
         # Class Distributions
         if len(training_frame) >= 20:
@@ -455,6 +540,7 @@ elif menu == "Train ML Models":
                             algorithm=policies.get("active_ml_algorithm", "Random Forest"),
                             attendance_threshold=p_att,
                             critical_score=40.0,
+                            critical_internal_threshold=p_cie,
                             trained_by=admin.get("username", "Admin"),
                         )
                 st.success("🎉 Academic Policies successfully updated and deployed! Changes are active immediately across all student and faculty portals.")

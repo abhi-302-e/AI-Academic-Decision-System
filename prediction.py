@@ -11,6 +11,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
+from models.train_registered_course_models import get_latest_model_evaluation
 
 # ==========================================================
 # FILE PATHS
@@ -404,9 +405,18 @@ def predict_student_comprehensive(student_id, semester=1):
             performance_votes.append(pred["performance_prediction"])
             risk_votes.append(pred["risk_level"])
 
-    if "High" in risk_votes:
+    att_thresh = float(policies.get("attendance_threshold", 75.0))
+    crit_int_thresh = float(policies.get("critical_internal_threshold", 24.0))
+
+    has_att_shortage = any(float(c.get("course_attendance") or 0.0) < att_thresh for c in course_results)
+    avg_internal_val = (
+        sum(float(c.get("internal_total") or 0.0) for c in course_results) / len(course_results)
+        if course_results else None
+    )
+
+    if "High" in risk_votes or (has_att_shortage and "Fail" in performance_votes):
         overall_risk = "High"
-    elif "Medium" in risk_votes:
+    elif "Medium" in risk_votes or has_att_shortage or (avg_internal_val is not None and avg_internal_val < crit_int_thresh):
         overall_risk = "Medium"
     elif risk_votes:
         overall_risk = "Low"
@@ -435,6 +445,7 @@ def predict_student_comprehensive(student_id, semester=1):
         "overall_risk": overall_risk,
         "course_predictions": course_results,
         "training_run": training_run,
+        "model_evaluation": get_latest_model_evaluation(),
         "policies": policies,
     }
 

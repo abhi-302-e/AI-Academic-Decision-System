@@ -40,6 +40,13 @@ from preprocessing.academic_schedule_import import parse_academic_workbooks
 
 require_admin()
 
+with st.sidebar:
+    st.markdown("### 🛡️ Admin Console")
+    st.divider()
+    if st.button("🚪 Logout", key="cm_logout", use_container_width=True, type="primary"):
+        st.session_state.clear()
+        st.rerun()
+
 st.title("📚 Course & Timetable Management Console")
 st.caption("Institutional Academic Administration · Curriculum Governance, 2-Semester Annual Structure & Section Timetables")
 

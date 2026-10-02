@@ -1,0 +1,154 @@
+{
+  "algorithm": "Random Forest",
+  "n_estimators": 200,
+  "max_depth": null,
+  "test_size": 0.2,
+  "attendance_threshold": 75.0,
+  "critical_score": 40.0,
+  "critical_internal_threshold": 24.0,
+  "performance_accuracy": 0.97375,
+  "risk_accuracy": 0.99,
+  "performance_confusion_matrix": {
+    "matrix": [
+      [
+        219,
+        3,
+        0
+      ],
+      [
+        2,
+        508,
+        15
+      ],
+      [
+        0,
+        1,
+        52
+      ]
+    ],
+    "labels": [
+      "Distinction",
+      "Pass",
+      "Fail"
+    ]
+  },
+  "risk_confusion_matrix": {
+    "matrix": [
+      [
+        617,
+        0,
+        0
+      ],
+      [
+        0,
+        137,
+        6
+      ],
+      [
+        0,
+        2,
+        38
+      ]
+    ],
+    "labels": [
+      "Low",
+      "Medium",
+      "High"
+    ]
+  },
+  "performance_report": {
+    "Distinction": {
+      "precision": 0.9909502262443439,
+      "recall": 0.9864864864864865,
+      "f1-score": 0.9887133182844243,
+      "support": 222.0
+    },
+    "Pass": {
+      "precision": 0.9921875,
+      "recall": 0.9676190476190476,
+      "f1-score": 0.9797492767598843,
+      "support": 525.0
+    },
+    "Fail": {
+      "precision": 0.7761194029850746,
+      "recall": 0.9811320754716981,
+      "f1-score": 0.8666666666666667,
+      "support": 53.0
+    },
+    "accuracy": 0.97375,
+    "macro avg": {
+      "precision": 0.9197523764098062,
+      "recall": 0.978412536525744,
+      "f1-score": 0.9450430872369918,
+      "support": 800.0
+    },
+    "weighted avg": {
+      "precision": 0.9775296451055666,
+      "recall": 0.97375,
+      "f1-score": 0.9747450753642685,
+      "support": 800.0
+    }
+  },
+  "risk_report": {
+    "Low": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 617.0
+    },
+    "Medium": {
+      "precision": 0.9856115107913669,
+      "recall": 0.958041958041958,
+      "f1-score": 0.9716312056737588,
+      "support": 143.0
+    },
+    "High": {
+      "precision": 0.8636363636363636,
+      "recall": 0.95,
+      "f1-score": 0.9047619047619048,
+      "support": 40.0
+    },
+    "accuracy": 0.99,
+    "macro avg": {
+      "precision": 0.9497492914759103,
+      "recall": 0.9693473193473192,
+      "f1-score": 0.9587977034785545,
+      "support": 800.0
+    },
+    "weighted avg": {
+      "precision": 0.990609875735775,
+      "recall": 0.99,
+      "f1-score": 0.9901671732522795,
+      "support": 800.0
+    }
+  },
+  "performance_feature_importances": {
+    "assignment_marks": 0.1129,
+    "quiz_marks": 0.1476,
+    "mid_exam_marks": 0.2205,
+    "viva_marks": 0.1213,
+    "external_marks": 0.3933,
+    "course_attendance": 0.0044
+  },
+  "risk_feature_importances": {
+    "assignment_marks": 0.0825,
+    "quiz_marks": 0.074,
+    "mid_exam_marks": 0.0752,
+    "viva_marks": 0.0798,
+    "external_marks": 0.2377,
+    "course_attendance": 0.4508
+  },
+  "performance_classes": {
+    "Pass": 2628,
+    "Distinction": 1109,
+    "Fail": 263
+  },
+  "risk_classes": {
+    "Low": 3086,
+    "Medium": 717,
+    "High": 197
+  },
+  "samples": 4000,
+  "trained_by": "Admin",
+  "trained_at": "2026-10-02 20:22:27"
+}

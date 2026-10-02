@@ -30,6 +30,13 @@ from database import (
 
 require_admin()
 
+with st.sidebar:
+    st.markdown("### 🛡️ Admin Console")
+    st.divider()
+    if st.button("🚪 Logout", key="sa_logout", use_container_width=True, type="primary"):
+        st.session_state.clear()
+        st.rerun()
+
 
 # =========================================================
 # HEADER

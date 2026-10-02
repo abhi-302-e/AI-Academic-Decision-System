@@ -67,6 +67,16 @@ with log_col:
         st.session_state.clear()
         st.rerun()
 
+with st.sidebar:
+    st.markdown("### 👨‍🏫 Faculty Workspace")
+    st.write(f"**{faculty_name}**")
+    st.caption(f"ID: `{employee_id}`")
+    st.caption(f"{designation} · {dept}")
+    st.divider()
+    if st.button("🚪 Logout", key="faculty_sidebar_logout", use_container_width=True, type="primary"):
+        st.session_state.clear()
+        st.rerun()
+
 schedule = get_faculty_timetable(faculty_id)
 
 # Quick Schedule Summary Bar
