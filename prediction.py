@@ -1,3 +1,4 @@
+
 """
 ===========================================================
 AI-Based Autonomous Academic Decision System
@@ -244,6 +245,35 @@ def predict_student(student_data):
     }
 
 
+def are_course_models_trained():
+    course_performance_model = MODEL_DIR / "course_performance_model.pkl"
+    course_risk_model = MODEL_DIR / "course_risk_model.pkl"
+    return course_performance_model.exists() and course_risk_model.exists()
+
+
+def predict_single_course_features(features_dict):
+    """Predict performance and risk directly from feature values (used for live Admin simulation)."""
+    course_performance_model = MODEL_DIR / "course_performance_model.pkl"
+    course_risk_model = MODEL_DIR / "course_risk_model.pkl"
+    if not course_performance_model.exists() or not course_risk_model.exists():
+        return None
+
+    features = pd.DataFrame([{
+        "assignment_marks": float(features_dict.get("assignment_marks", 0.0)),
+        "quiz_marks": float(features_dict.get("quiz_marks", 0.0)),
+        "mid_exam_marks": float(features_dict.get("mid_exam_marks", 0.0)),
+        "viva_marks": float(features_dict.get("viva_marks", 0.0)),
+        "external_marks": float(features_dict.get("external_marks", 0.0)),
+        "course_attendance": float(features_dict.get("course_attendance", 0.0)),
+    }])
+    trained_performance_model = joblib.load(course_performance_model)
+    trained_risk_model = joblib.load(course_risk_model)
+    return {
+        "performance_prediction": trained_performance_model.predict(features)[0],
+        "risk_level": trained_risk_model.predict(features)[0],
+    }
+
+
 def predict_registered_course(assessment):
     """Predict from a fully graded, registered course using Admin-trained models."""
     course_performance_model = MODEL_DIR / "course_performance_model.pkl"
@@ -255,20 +285,159 @@ def predict_registered_course(assessment):
     ):
         return None
 
-    features = pd.DataFrame([{
-        "assignment_marks": assessment["assignment_marks"],
-        "quiz_marks": assessment["quiz_marks"],
-        "mid_exam_marks": assessment["mid_exam_marks"],
-        "viva_marks": assessment["viva_marks"],
-        "external_marks": assessment["external_marks"],
-        "course_attendance": assessment["course_attendance"],
-    }])
-    trained_performance_model = joblib.load(course_performance_model)
-    trained_risk_model = joblib.load(course_risk_model)
+    return predict_single_course_features({
+        "assignment_marks": assessment.get("assignment_marks", 0.0),
+        "quiz_marks": assessment.get("quiz_marks", 0.0),
+        "mid_exam_marks": assessment.get("mid_exam_marks", 0.0),
+        "viva_marks": assessment.get("viva_marks", 0.0),
+        "external_marks": assessment.get("external_marks", 0.0),
+        "course_attendance": assessment.get("course_attendance", 0.0),
+    })
+
+
+def predict_student_comprehensive(student_id, semester=1):
+    """
+    Generate comprehensive course-wise and overall prediction for registered student
+    using Admin-trained ML models and Admin academic policies.
+    """
+    from database import (
+        get_student_semester_registration,
+        get_student_course_assessments,
+        get_latest_model_training_run,
+        get_academic_policies,
+    )
+
+    policies = get_academic_policies()
+    if not policies.get("predictions_enabled", 1):
+        return {
+            "registered": True,
+            "trained": True,
+            "predictions_enabled": False,
+            "status_message": "AI predictions & risk advisories are temporarily paused by Academic Administration for model recalibration.",
+            "overall_performance": "Paused by Admin",
+            "overall_risk": "Paused",
+            "course_predictions": [],
+            "training_run": None,
+            "policies": policies,
+        }
+
+    raw_reg = get_student_semester_registration(student_id, semester)
+    reg = dict(raw_reg) if raw_reg else None
+    if not reg or reg.get("status") != "Registered":
+        return {
+            "registered": False,
+            "trained": False,
+            "predictions_enabled": True,
+            "status_message": "Student is not registered for this semester. Semester registration required before academic evaluation.",
+            "overall_performance": "Not Registered",
+            "overall_risk": "N/A",
+            "course_predictions": [],
+            "training_run": None,
+            "policies": policies,
+        }
+
+    training_run = get_latest_model_training_run()
+    if not are_course_models_trained():
+        return {
+            "registered": True,
+            "trained": False,
+            "predictions_enabled": True,
+            "status_message": "Awaiting Admin ML Training. The Administrator has not trained the predictive model on registered academic data yet.",
+            "overall_performance": "Awaiting Model",
+            "overall_risk": "Awaiting Model",
+            "course_predictions": [],
+            "training_run": training_run,
+            "policies": policies,
+        }
+
+    assessments = get_student_course_assessments(student_id, semester)
+    if not assessments:
+        return {
+            "registered": True,
+            "trained": True,
+            "predictions_enabled": True,
+            "status_message": "Enrolled in courses. Awaiting assessment grading by assigned course faculty.",
+            "overall_performance": "Pending Grades",
+            "overall_risk": "Pending Grades",
+            "course_predictions": [],
+            "training_run": training_run,
+            "policies": policies,
+        }
+
+
+    course_results = []
+    performance_votes = []
+    risk_votes = []
+
+    for a in assessments:
+        pred = predict_registered_course(a)
+        if pred:
+            internal_total = a.get("internal_total")
+            if internal_total is None and a.get("assignment_marks") is not None:
+                internal_total = round(
+                    float(a.get("assignment_marks") or 0)
+                    + float(a.get("quiz_marks") or 0)
+                    + float(a.get("mid_exam_marks") or 0)
+                    + float(a.get("viva_marks") or 0),
+                    2
+                )
+            overall_total = a.get("overall_total")
+            if overall_total is None and internal_total is not None and a.get("external_marks") is not None:
+                overall_total = round(internal_total + float(a.get("external_marks") or 0), 2)
+
+            course_results.append({
+                "course_code": a.get("course_code"),
+                "course_name": a.get("course_name"),
+                "credits": a.get("credits"),
+                "performance_prediction": pred["performance_prediction"],
+                "risk_level": pred["risk_level"],
+                "mid_exam_marks": a.get("mid_exam_marks"),
+                "assignment_marks": a.get("assignment_marks"),
+                "quiz_marks": a.get("quiz_marks"),
+                "viva_marks": a.get("viva_marks"),
+                "internal_total": internal_total,
+                "external_marks": a.get("external_marks"),
+                "overall_total": overall_total,
+                "course_attendance": a.get("course_attendance"),
+                "faculty_name": a.get("faculty_name"),
+            })
+            performance_votes.append(pred["performance_prediction"])
+            risk_votes.append(pred["risk_level"])
+
+    if "High" in risk_votes:
+        overall_risk = "High"
+    elif "Medium" in risk_votes:
+        overall_risk = "Medium"
+    elif risk_votes:
+        overall_risk = "Low"
+    else:
+        overall_risk = "Low"
+
+    if "Fail" in performance_votes:
+        fail_count = performance_votes.count("Fail")
+        if fail_count >= 2:
+            overall_perf = "Fail"
+        else:
+            overall_perf = "Pass"
+    elif "Pass" in performance_votes:
+        overall_perf = "Pass"
+    elif performance_votes:
+        overall_perf = "Distinction"
+    else:
+        overall_perf = "Pending"
+
     return {
-        "performance_prediction": trained_performance_model.predict(features)[0],
-        "risk_level": trained_risk_model.predict(features)[0],
+        "registered": True,
+        "trained": True,
+        "predictions_enabled": True,
+        "status_message": "Evaluated successfully from registered courses and real-time attendance.",
+        "overall_performance": overall_perf,
+        "overall_risk": overall_risk,
+        "course_predictions": course_results,
+        "training_run": training_run,
+        "policies": policies,
     }
+
 
 
 # ==========================================================

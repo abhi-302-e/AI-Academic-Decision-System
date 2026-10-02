@@ -1,0 +1,10 @@
+Registered Course Models (Random Forest)
+========================
+Training rows: 4000
+Algorithm: Random Forest
+Hyperparameters: n_estimators=200, max_depth=None, test_size=0.2
+Policy Thresholds: attendance=75.0%, critical_score=40.0
+Performance classes: {'Pass': 2628, 'Distinction': 1109, 'Fail': 263}
+Risk classes: {'Low': 3086, 'Medium': 717, 'High': 197}
+Performance holdout accuracy: 0.9738
+Risk holdout accuracy: 0.9900
