@@ -333,4 +333,8 @@ Open **[http://localhost:8501](http://localhost:8501)** in your browser.
 
 ---
 
+## 🌐 Live Demo
+
+👉 [Open AI Academic Decision System](https://ai-academic-decision-system.streamlit.app/)
+
 
