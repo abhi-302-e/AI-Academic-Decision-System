@@ -30,15 +30,12 @@ with sign_in:
     if role == "Student":
         username_label = "Enrollment Number / Roll Number"
         username_placeholder = "e.g. 26STU0001, 1, or student"
-        st.caption("🔑 **Student Credentials:** Roll/Enrollment: `26STU0001` (or `student` / `1`) · Password: `student@123`")
     elif role == "Faculty":
         username_label = "Employee ID"
         username_placeholder = "e.g. SCHED0001"
-        st.caption("🔑 **Faculty Credentials:** Employee ID: `SCHED0001` · Password: `faculty@123`")
     else:
         username_label = "Admin Username"
         username_placeholder = "e.g. admin or abhishek"
-        st.caption("🔑 **Admin Credentials:** Username: `admin` · Password: `admin123`")
 
     with st.form("login_form"):
         username = st.text_input(username_label, placeholder=username_placeholder)
