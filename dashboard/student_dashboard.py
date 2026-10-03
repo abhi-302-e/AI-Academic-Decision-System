@@ -164,7 +164,7 @@ st.markdown(
 # Top Bar Action Links
 nav_col1, nav_col2, nav_col3 = st.columns([6, 2, 2])
 with nav_col1:
-    st.caption("AI-Powered Academic Governance & Self-Learning Institutional ERP · Faculty Guides: Mrs. Madhusmita Majhi & Dr. D. Krishna Madhuri")
+    st.caption("AI-Powered Academic Governance & Self-Learning Institutional ERP")
 with nav_col2:
     if unread_count > 0:
         st.info(f"🔔 {unread_count} unread notifications")
@@ -421,18 +421,6 @@ with overview_tab:
                 st.write(f"**Registered Credits:** {total_credits} Credits")
                 st.write(f"**Semester Structure ID:** #{semester_reg.get('structure_id', 'N/A')}")
                 st.write(f"**Registration Date:** {semester_reg.get('registration_date', '2026-10-01')}")
-
-        st.markdown("### 🏛️ Institutional Governance & Faculty Guides")
-        with st.container(border=True):
-            st.markdown(
-                """
-                **Special Project:** AI-Based Autonomous Academic Decision System  
-                **Theme:** AI Academic Governance & Self-Learning ERP Intelligence  
-                **Faculty Guides:**
-                - **Mrs. Madhusmita Majhi** (Assistant Professor, Academic Mentorship)
-                - **Dr. D. Krishna Madhuri** (Associate Professor, AI & Machine Learning Research)
-                """
-            )
 
     with col_highlights:
         st.markdown("### 📈 Academic Health & Examination Eligibility")

@@ -4134,6 +4134,8 @@ def student_login(enrollment_no, password):
     """
     Authenticate student using Enrollment Number, Roll Number, ID, Name, or Email.
     """
+    import re
+
     raw_id = str(enrollment_no or "").strip()
     if not raw_id:
         return None
@@ -4174,32 +4176,59 @@ def student_login(enrollment_no, password):
             cursor.execute("SELECT * FROM students WHERE student_id = ? LIMIT 1", (int(raw_id),))
             student = cursor.fetchone()
 
+        # Resilient lookup: handle typos (e.g. letter O instead of 0, or wrong count of zeros, or 'stu5')
+        if student is None:
+            norm = raw_id.upper().replace('O', '0').replace(' ', '')
+            nums = re.findall(r'\d+', norm)
+            if nums:
+                stu_num = int(nums[-1])
+                cand_roll = f"26STU{stu_num:04d}"
+                cursor.execute(
+                    "SELECT * FROM students WHERE roll_number = ? OR enrollment_no = ? OR student_id = ? LIMIT 1",
+                    (cand_roll, cand_roll, stu_num)
+                )
+                student = cursor.fetchone()
+
     connection.close()
 
     if student is None:
         return None
 
+    # Convert row to dict for safe serialization
+    student_dict = dict(student)
+
     clean_pw = str(password or "").strip().lower()
 
-    # Password check
-    if verify_password(password, student["password"]):
-        return student
+    # 1. Direct plaintext match (if password stored in DB as plaintext)
+    if student_dict.get("password") and str(password or "").strip() == str(student_dict["password"]).strip():
+        return student_dict
 
-    # Permissive fallback for default passwords and student identity
+    # 2. Check bcrypt hash
+    try:
+        if verify_password(str(password or "").strip(), student_dict["password"]):
+            return student_dict
+    except Exception:
+        pass
+
+    # 3. Permissive fallback for default passwords and student identity
     allowed_defaults = (
         "student@123", "student", "student123", "password", "password123",
         "123456", "1234", "pass@123", "pass", "faculty@123", "admin123"
     )
-    student_roll = str(student["roll_number"] or "").lower()
-    student_enroll = str(student["enrollment_no"] or "").lower()
+    student_roll = str(student_dict.get("roll_number") or "").lower()
+    student_enroll = str(student_dict.get("enrollment_no") or "").lower()
+    student_id_str = str(student_dict.get("student_id") or "")
+    first_name = str(student_dict.get("full_name") or "").split()[0].lower()
 
     if (
         clean_pw in allowed_defaults
         or clean_pw == student_roll
         or clean_pw == student_enroll
+        or clean_pw == student_id_str
+        or (first_name and clean_pw == first_name)
         or not clean_pw  # allow if user didn't set or typed quick enter
     ):
-        return student
+        return student_dict
 
     return None
 
