@@ -35,7 +35,7 @@ with sign_in:
         username_placeholder = "e.g. SCHED0001"
     else:
         username_label = "Admin Username"
-        username_placeholder = "e.g. admin or abhishek"
+        username_placeholder = "e.g. admin"
 
     with st.form("login_form"):
         username = st.text_input(username_label, placeholder=username_placeholder)

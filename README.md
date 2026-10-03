@@ -325,11 +325,11 @@ Open **[http://localhost:8501](http://localhost:8501)** in your browser.
 
 | Role | Username / Identifier | Password | Access & Features |
 |---|---|---|---|
-| **Student (Section A)** | `26STU0001` | `Password@123` | ICFAI ERP Portal, 60/40 Gradebook, Timetable, AI Radar |
-| **Student (Section B)** | `26STU0051` | `Password@123` | Section B Timetable, Gradebook, AI Predictions |
-| **Student (Section C)** | `26STU0101` | `Password@123` | Section C Timetable, Gradebook, AI Predictions |
-| **Faculty Member** | `SCHED001` | `Faculty@123` | 60/40 Marks Entry, 50-Student Attendance Roster |
-| **Administrator** | `admin` | `Admin@123` | Multi-Dataset ML Training Center, Dataset Explorer, Approvals |
+| **Student (Section A)** | `26STU0001` | `student@123` | ICFAI ERP Portal, 60/40 Gradebook, Timetable, AI Radar |
+| **Student (Section B)** | `26STU0051` | `student@123` | Section B Timetable, Gradebook, AI Predictions |
+| **Student (Section C)** | `26STU0101` | `student@123` | Section C Timetable, Gradebook, AI Predictions |
+| **Faculty Member** | `SCHED0001` (or `SCHED001`) | `faculty@123` | 60/40 Marks Entry, 50-Student Attendance Roster |
+| **Administrator** | `admin` | `admin@123` | Multi-Dataset ML Training Center, Dataset Explorer, Approvals |
 
 ---
 
