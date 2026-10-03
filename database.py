@@ -1760,6 +1760,30 @@ def save_course_assessment(timetable_id, faculty_id, student_id, scores):
                 normalized_scores["viva_marks"], normalized_scores["external_marks"],
             )
         )
+        avg_scores = connection.execute(
+            """
+            SELECT 
+                AVG(assignment_marks + quiz_marks + mid_exam_marks + viva_marks) AS avg_int,
+                AVG(external_marks) AS avg_ext
+            FROM course_assessments
+            WHERE student_id = ?
+            """,
+            (student_id,)
+        ).fetchone()
+        if avg_scores and avg_scores["avg_int"] is not None:
+            connection.execute(
+                """
+                UPDATE students
+                SET internal_marks = ROUND(?, 2),
+                    external_marks = ROUND(?, 2)
+                WHERE student_id = ?
+                """,
+                (
+                    avg_scores["avg_int"],
+                    avg_scores["avg_ext"] if avg_scores["avg_ext"] is not None else 0.0,
+                    student_id,
+                )
+            )
         connection.commit()
         return True, "Course marks saved."
     except sqlite3.Error:
@@ -4301,19 +4325,16 @@ def admin_update_student_profile(
     current_year,
     semester,
     section,
-    cgpa,
-    attendance_percentage,
-    internal_marks,
-    external_marks,
+    cgpa=None,
+    attendance_percentage=None,
+    internal_marks=None,
+    external_marks=None,
 ):
     if (
         not 1 <= int(current_year) <= 4
         or not 1 <= int(semester) <= 8
         or section not in SECTION_NAMES
-        or not 0 <= float(cgpa) <= 10
-        or not 0 <= float(attendance_percentage) <= 100
-        or not 0 <= float(internal_marks) <= 60
-        or not 0 <= float(external_marks) <= 40
+        or (cgpa is not None and not 0 <= float(cgpa) <= 10)
     ):
         return False, "One or more academic values are outside their allowed range."
 
@@ -4321,7 +4342,7 @@ def admin_update_student_profile(
     try:
         connection.execute("BEGIN IMMEDIATE")
         student = connection.execute(
-            "SELECT department, current_year, semester, section FROM students WHERE student_id = ?",
+            "SELECT department, current_year, semester, section, cgpa, attendance_percentage, internal_marks, external_marks FROM students WHERE student_id = ?",
             (student_id,)
         ).fetchone()
         if student is None:
@@ -4338,6 +4359,12 @@ def admin_update_student_profile(
         if section_count >= 75:
             return False, f"Section {section} already has 75 students for this department, year, and semester."
 
+        final_cgpa = float(cgpa) if cgpa is not None else float(student["cgpa"] or 0)
+        # Attendance and marks are strictly submitted from faculty; preserve existing faculty records
+        final_att = float(student["attendance_percentage"] or 0)
+        final_int = float(student["internal_marks"] or 0)
+        final_ext = float(student["external_marks"] or 0)
+
         connection.execute(
             """
             UPDATE students
@@ -4349,12 +4376,11 @@ def admin_update_student_profile(
             (
                 full_name.strip(), gender, department, email.strip().lower(),
                 phone.strip(), int(current_year), int(semester), section,
-                float(cgpa), float(attendance_percentage),
-                float(internal_marks), float(external_marks), student_id,
+                final_cgpa, final_att, final_int, final_ext, student_id,
             )
         )
         connection.commit()
-        return True, "Student profile and academic records updated."
+        return True, "Student profile updated (Attendance and marks are managed exclusively by faculty)."
     except sqlite3.IntegrityError:
         connection.rollback()
         return False, "Email or another unique account field is already in use."

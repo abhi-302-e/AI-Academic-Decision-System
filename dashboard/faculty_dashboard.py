@@ -19,9 +19,6 @@ if str(ROOT_DIR) not in sys.path:
 
 from auth import require_faculty
 from database import (
-    ACADEMIC_DAYS,
-    ACADEMIC_PERIODS,
-    SECTION_NAMES,
     create_student_notification,
     get_connection,
     get_course_assessment_roster,
@@ -31,8 +28,6 @@ from database import (
     get_session_attendance_roster,
     get_student_by_roll,
     get_student_course_assessments,
-    get_teachable_course_options,
-    request_faculty_teaching_assignment,
     save_course_assessment,
     submit_session_attendance,
 )
@@ -67,6 +62,11 @@ with log_col:
         st.session_state.clear()
         st.rerun()
 
+st.info(
+    "🔒 **Academic Evaluation Authority:** Student session attendance and course assessment marks (CIE / SEE) "
+    "can **only be submitted by assigned course faculty**. Administration and student portals cannot submit or modify these records."
+)
+
 with st.sidebar:
     st.markdown("### 👨‍🏫 Faculty Workspace")
     st.write(f"**{faculty_name}**")
@@ -88,16 +88,15 @@ if schedule:
     k3.metric("Section Strength", "50 Students / Section")
     k4.metric("Evaluation Framework", "60 Internal / 40 External")
 else:
-    st.warning("You do not have any approved timetable slots assigned yet. Request assignments below.")
+    st.warning("You do not have any approved timetable slots assigned yet. Course and section assignments are managed by Academic Administration.")
 
-# Tabs
-tab_assess, tab_att, tab_search, tab_risk, tab_analytics, tab_req = st.tabs([
+# Tabs: Faculty only submits student attendance and marks
+tab_assess, tab_att, tab_search, tab_risk, tab_analytics = st.tabs([
     "📝 Course Assessment (60/40 CIE)",
     "📋 Session Attendance",
     "🔍 Student Search & Summary",
     "🚨 At-Risk Student Detection",
     "📊 Section Analytics & Trends",
-    "➕ Request Teaching Assignment",
 ])
 
 # =============================================================
@@ -495,40 +494,3 @@ with tab_analytics:
 
         st.markdown("##### Average Attendance by Section (%)")
         st.bar_chart(sec_df.set_index("section")["avg_attendance"])
-
-# =============================================================
-# TAB 6: REQUEST TEACHING ASSIGNMENT
-# =============================================================
-with tab_req:
-    st.subheader("➕ Request Teaching Assignment")
-    st.caption("Submit a request for an accredited course, section, and 50-minute weekday period for Admin approval.")
-
-    teachable = get_teachable_course_options(dept)
-    if not teachable:
-        st.info("No published courses are available for assignment in your department.")
-    else:
-        c_opts = {
-            f"{c['course_code']} · {c['course_name']} · Year {c['year']} Sem {c['semester']}": c
-            for c in teachable
-        }
-        with st.form("fac_teaching_req_form"):
-            c_label = st.selectbox("Course", list(c_opts.keys()))
-            c_obj = c_opts[c_label]
-            req_sec = st.selectbox("Section", list(SECTION_NAMES))
-            req_day = st.selectbox("Weekday", list(ACADEMIC_DAYS))
-            req_slot = st.selectbox(
-                "Period",
-                list(ACADEMIC_PERIODS),
-                format_func=lambda v: f"{v} · {ACADEMIC_PERIODS[v][0]}–{ACADEMIC_PERIODS[v][1]}",
-            )
-            req_room = st.text_input("Preferred Room / Lab (optional)", "LH-101")
-            submit_req = st.form_submit_button("Submit Request for Admin Approval", type="primary")
-
-        if submit_req:
-            r_id = request_faculty_teaching_assignment(
-                faculty_id, c_obj["course_id"], req_sec, req_day, req_slot, req_room
-            )
-            if r_id:
-                st.success(f"Teaching request submitted for Admin review. Request ID: #{r_id}")
-            else:
-                st.error("Request conflicts with an existing timetable slot or could not be saved.")

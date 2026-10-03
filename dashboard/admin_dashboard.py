@@ -1255,17 +1255,15 @@ elif menu == "Manage Academic Records":
                         "CGPA (0–10)", min_value=0.0, max_value=10.0,
                         value=float(student_record["cgpa"] or 0), step=0.01,
                     )
-                    attendance_percentage = st.number_input(
-                        "Attendance (0–100%)", min_value=0.0, max_value=100.0,
-                        value=float(student_record["attendance_percentage"] or 0), step=0.1,
-                    )
-                    internal_marks = st.number_input(
-                        "Internal marks (/60)", min_value=0.0, max_value=60.0,
-                        value=float(student_record["internal_marks"] or 0), step=0.5,
-                    )
-                    external_marks = st.number_input(
-                        "External marks (/40)", min_value=0.0, max_value=40.0,
-                        value=float(student_record["external_marks"] or 0), step=0.5,
+                    st.markdown("###### 🔒 Faculty-Governed Evaluations")
+                    st.caption("Student session attendance and course marks can only be submitted by assigned faculty.")
+                    att_val = float(student_record["attendance_percentage"] or 0)
+                    int_val = float(student_record["internal_marks"] or 0)
+                    ext_val = float(student_record["external_marks"] or 0)
+                    st.info(
+                        f"• **Session Attendance:** {att_val:.1f}%\n\n"
+                        f"• **Internal CIE Marks:** {int_val:.1f} / 60\n\n"
+                        f"• **External SEE Marks:** {ext_val:.1f} / 40"
                     )
                 update_student_record = st.form_submit_button("Save student profile", type="primary")
 
@@ -1281,9 +1279,6 @@ elif menu == "Manage Academic Records":
                     semester,
                     section,
                     cgpa,
-                    attendance_percentage,
-                    internal_marks,
-                    external_marks,
                 )
                 if success:
                     st.success(message)
