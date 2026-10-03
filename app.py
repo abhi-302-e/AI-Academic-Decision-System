@@ -49,7 +49,7 @@ connection.close()
 if not has_student_table:
     initialize_app_database.clear()
 
-initialize_app_database("recovery-demo-data-v1")
+initialize_app_database("credentials-update-v2")
 
 role = st.session_state.get("role")
 
