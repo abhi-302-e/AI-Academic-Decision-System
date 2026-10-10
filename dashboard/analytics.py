@@ -30,7 +30,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-st.title("📊 Phase 3: Exploratory Data Analysis (EDA) & Institutional Analytics")
+st.title("📊  Exploratory Data Analysis (EDA) & Institutional Analytics")
 st.caption("AI-Based Autonomous Academic Decision System · Comprehensive Analytics on 500 First-Year Students across Sections A through J.")
 
 students_df = get_all_students()
