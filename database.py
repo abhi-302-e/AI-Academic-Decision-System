@@ -3451,20 +3451,31 @@ def get_active_courses():
     return [dict(row) for row in rows]
 
 
-def get_default_section_names(department, year, semester):
+def get_default_section_names(department=None, year=None, semester=None):
     connection = get_connection()
-    rows = connection.execute(
-        """
+    clauses = ["section_name IS NOT NULL"]
+    params = []
+    if department:
+        clauses.append("department = ?")
+        params.append(department)
+    if year is not None:
+        clauses.append("year = ?")
+        params.append(year)
+    if semester is not None:
+        clauses.append("semester = ?")
+        params.append(semester)
+
+    query = f"""
         SELECT DISTINCT section_name
         FROM sections
-        WHERE department = ? AND year = ? AND semester = ?
-        AND section_name IS NOT NULL
+        WHERE {' AND '.join(clauses)}
         ORDER BY section_name
-        """,
-        (department, year, semester)
-    ).fetchall()
+    """
+    rows = connection.execute(query, tuple(params)).fetchall()
     connection.close()
-    return [row["section_name"] for row in rows]
+    sections = [row["section_name"] for row in rows if row["section_name"]]
+    return sections or list(SECTION_NAMES)
+
 
 
 def import_academic_schedule(parsed_schedule):

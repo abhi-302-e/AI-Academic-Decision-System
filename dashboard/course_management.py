@@ -34,6 +34,7 @@ from database import (
     delete_timetable_slot,
     get_all_faculty,
     get_default_section_names,
+    SECTION_NAMES,
     import_academic_schedule,
 )
 from preprocessing.academic_schedule_import import parse_academic_workbooks
@@ -307,7 +308,7 @@ with tab_timetable:
 
     # Filters
     f_sec, f_day = st.columns(2)
-    default_sections = get_default_section_names()
+    default_sections = get_default_section_names(selected_dept, selected_year, selected_sem) or list(SECTION_NAMES)
     with f_sec:
         sec_filter = st.selectbox("Filter by Section", ["All Sections"] + default_sections)
     with f_day:
