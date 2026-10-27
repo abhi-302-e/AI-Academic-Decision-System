@@ -1,7 +1,7 @@
 # AI-Based Autonomous Academic Decision System
 
 **Domain:** Artificial Intelligence + Machine Learning + Data Analytics  
-**Real-World Application:** Self-Learning ERP Intelligence  
+**Real-World Application:** Self-Learning ERP Intelligence  .
 **Theme:** AI Academic Governance  
 **Faculty Guides:** Mrs. Madhusmita Majhi & Dr. D. Krishna Madhuri  
 **Institution:** The ICFAI Foundation for Higher Education (IFHE), Faculty of Science & Technology (FST), Hyderabad  
