@@ -7,6 +7,7 @@ Faculty Guides: Mrs. Madhusmita Majhi & Dr. D. Krishna Madhuri
 ===========================================================
 """
 
+import io
 import sys
 from datetime import date
 from pathlib import Path
@@ -30,11 +31,20 @@ from database import (
     get_student_course_assessments,
     save_course_assessment,
     submit_session_attendance,
+    log_marks_audit,
+    get_marks_audit_logs,
 )
-from email_service import send_email
+from email_service import (
+    send_email,
+    send_attendance_shortage_email,
+    get_configured_admin_email,
+)
 from prediction import predict_registered_course, are_course_models_trained
 from recommendation_engine import generate_course_level_recommendations
-from sms_service import send_academic_update_sms
+from sms_service import (
+    send_academic_update_sms,
+    send_attendance_shortage_sms,
+)
 
 require_faculty()
 faculty = dict(st.session_state.user_data or {})
@@ -220,6 +230,16 @@ with tab_assess:
                 if not success:
                     st.error(message)
                 else:
+                    log_marks_audit(
+                        student_id=selected_student["student_id"],
+                        course_id=selected_slot.get("course_id"),
+                        course_code=selected_slot.get("course_code"),
+                        faculty_name=faculty_name,
+                        component="CIE/SEE Assessment",
+                        old_val=float(selected_student.get("mid_exam_marks") or 0),
+                        new_val=float(mid_exam),
+                        action="UPDATE",
+                    )
                     internal_total = assignment + quiz + mid_exam + viva
                     course_att = get_course_attendance_percentage(
                         selected_student["student_id"],
@@ -232,8 +252,98 @@ with tab_assess:
                         f"Internal {internal_total:.1f}/60, External {external:.1f}/40{att_str}."
                     )
                     create_student_notification(selected_student["student_id"], "Course Assessment Updated", update_msg)
-                    st.success(f"Assessment saved successfully for {selected_student['full_name']}!")
+                    st.success(f"Assessment saved and audited successfully for {selected_student['full_name']}!")
                     st.rerun()
+
+            # -------------------------------------------------------------
+            # BULK EXCEL UPLOAD & ROSTER DOWNLOAD
+            # -------------------------------------------------------------
+            st.markdown("---")
+            st.markdown("##### 📊 Bulk Excel Marks Entry & Roster Sync")
+            st.caption("Download the section grading template, enter scores offline in Excel, and upload for instant automated validation.")
+
+            excel_col1, excel_col2 = st.columns(2)
+
+            with excel_col1:
+                st.markdown("###### 📥 Step 1: Download Roster Template")
+                template_rows = []
+                for s in roster:
+                    template_rows.append({
+                        "student_id": s["student_id"],
+                        "roll_number": s["roll_number"],
+                        "student_name": s["full_name"],
+                        "mid_exam_30": float(s.get("mid_exam_marks") or 18.0),
+                        "assignment_10": float(s.get("assignment_marks") or 7.5),
+                        "quiz_10": float(s.get("quiz_marks") or 8.0),
+                        "viva_10": float(s.get("viva_marks") or 7.0),
+                        "external_40": float(s.get("external_marks") or 28.0),
+                    })
+                template_df = pd.DataFrame(template_rows)
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                    template_df.to_excel(writer, index=False, sheet_name="Roster_Marks")
+                excel_data = buffer.getvalue()
+
+                st.download_button(
+                    label=f"📥 Download Excel Template · Section {selected_slot['section']} ({len(roster)} Students)",
+                    data=excel_data,
+                    file_name=f"{selected_slot['course_code']}_Sec{selected_slot['section']}_Marks_Template.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+
+            with excel_col2:
+                st.markdown("###### 📤 Step 2: Upload Completed Spreadsheet")
+                uploaded_file = st.file_uploader("Upload Completed .xlsx File", type=["xlsx"], key="bulk_marks_uploader")
+                if uploaded_file is not None:
+                    try:
+                        upload_df = pd.read_excel(uploaded_file)
+                        st.write(f"Loaded **{len(upload_df)}** student score records from spreadsheet.")
+                        if st.button("🚀 Validate & Save Bulk Marks to Database", type="primary", use_container_width=True):
+                            saved_count = 0
+                            for _, row in upload_df.iterrows():
+                                s_id = int(row["student_id"])
+                                m_mid = min(max(float(row.get("mid_exam_30", 0.0)), 0.0), 30.0)
+                                m_assn = min(max(float(row.get("assignment_10", 0.0)), 0.0), 10.0)
+                                m_quiz = min(max(float(row.get("quiz_10", 0.0)), 0.0), 10.0)
+                                m_viva = min(max(float(row.get("viva_10", 0.0)), 0.0), 10.0)
+                                m_ext = min(max(float(row.get("external_40", 0.0)), 0.0), 40.0)
+
+                                ok, _ = save_course_assessment(
+                                    selected_slot["timetable_id"],
+                                    faculty_id,
+                                    s_id,
+                                    {
+                                        "assignment_marks": m_assn,
+                                        "quiz_marks": m_quiz,
+                                        "mid_exam_marks": m_mid,
+                                        "viva_marks": m_viva,
+                                        "external_marks": m_ext,
+                                    },
+                                )
+                                if ok:
+                                    log_marks_audit(
+                                        student_id=s_id,
+                                        course_id=selected_slot.get("course_id"),
+                                        course_code=selected_slot.get("course_code"),
+                                        faculty_name=faculty_name,
+                                        component="Bulk Excel Import",
+                                        old_val=0.0,
+                                        new_val=m_mid,
+                                        action="BULK_IMPORT",
+                                    )
+                                    saved_count += 1
+                            st.success(f"✅ Successfully updated assessments for {saved_count} students from Excel file!")
+                            st.rerun()
+                    except Exception as err:
+                        st.error(f"Error parsing Excel spreadsheet: {err}")
+
+            with st.expander("📜 View Institutional Marks Audit Trail", expanded=False):
+                audit_logs = get_marks_audit_logs(limit=25)
+                if audit_logs:
+                    st.dataframe(pd.DataFrame(audit_logs), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No marks modification logs recorded yet.")
 
 # =============================================================
 # TAB 2: SESSION ATTENDANCE
@@ -446,6 +556,39 @@ with tab_risk:
                     create_student_notification(r["student_id"], notice_title, notice_body)
                     sent_count += 1
                 st.success(f"Early warning advisory successfully sent to {sent_count} students.")
+
+        st.markdown("#### 🚨 Statutory Attendance Shortage Alert (< 75%) Dispatch Center")
+        st.caption(f"Send live Email and SMS notifications to students and parents using permanent admin sender: `{get_configured_admin_email()}`")
+
+        shortage_students = [r for r in risk_students if float(dict(r).get("attendance_percentage") or 0) < 75.0]
+        if st.button(f"🚀 Dispatch Statutory Shortage Alerts to {len(shortage_students)} Students & Parents", type="primary", use_container_width=True):
+            email_sent = 0
+            sms_sent = 0
+            for r in shortage_students:
+                s_rec = get_student_by_roll(r["roll_number"])
+                if s_rec:
+                    att_val = float(s_rec.get("attendance_percentage") or 0.0)
+                    e_res = send_attendance_shortage_email(
+                        to_email=s_rec.get("email"),
+                        full_name=s_rec.get("full_name"),
+                        roll_no=s_rec.get("roll_number"),
+                        attendance_pct=att_val,
+                        parent_email=s_rec.get("parent_email"),
+                    )
+                    if e_res.get("success") or e_res.get("status") in ("delivered", "config_required"):
+                        email_sent += 1
+
+                    s_res = send_attendance_shortage_sms(
+                        phone_number=s_rec.get("phone"),
+                        full_name=s_rec.get("full_name"),
+                        attendance_pct=att_val,
+                        parent_phone=s_rec.get("parent_phone"),
+                    )
+                    if s_res.get("success") or s_res.get("status") in ("delivered", "config_required"):
+                        sms_sent += 1
+
+            st.success(f"✅ Dispatched statutory shortage alerts: {email_sent} Emails and {sms_sent} SMS queued/sent!")
+
 
 # =============================================================
 # TAB 5: SECTION ANALYTICS & TRENDS

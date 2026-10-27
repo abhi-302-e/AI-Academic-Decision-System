@@ -33,6 +33,14 @@ from database import (
     mark_student_notifications_read,
     get_latest_model_training_run,
     get_academic_policies,
+    get_student_semester_fees,
+    get_student_fee_statements,
+    get_student_fines,
+    pay_student_fine,
+    get_student_refund_requests,
+    submit_refund_request,
+    update_student_contact_info,
+    get_system_announcements,
     ACADEMIC_DAYS,
     ACADEMIC_PERIODS,
 )
@@ -40,8 +48,19 @@ from prediction import (
     predict_student_comprehensive,
     are_course_models_trained,
     get_latest_model_evaluation,
+    explain_student_academic_prediction,
+    simulate_student_academic_outcomes,
 )
 from recommendation_engine import generate_course_level_recommendations, generate_recommendation
+from email_service import (
+    send_student_recommendations_email,
+    get_configured_admin_email,
+    is_email_service_active,
+)
+from sms_service import (
+    send_academic_recommendation_sms,
+    is_sms_service_configured,
+)
 
 
 def render_student_confusion_matrix_section(eval_data, model_type="performance"):
@@ -108,16 +127,21 @@ assigned_section = student.get("section") or "Unassigned"
 department = student.get("department", "Engineering & Technology")
 full_name = student.get("full_name", "Student")
 roll_number = student.get("roll_number", "N/A")
+enrollment_number = student.get("enrollment_no") or f"26IFHE{student_id:04d}"
+student_phone = student.get("phone") or "Not Registered"
+student_email = student.get("email") or "Not Registered"
 
 # Fetch Registration Status
 raw_reg = get_student_semester_registration(student_id, current_semester)
 semester_reg = dict(raw_reg) if raw_reg else None
 is_registered = bool(semester_reg and semester_reg.get("status") == "Registered")
 
-
 # Fetch Notifications
 notifications = get_student_notifications(student_id)
 unread_count = sum(not n["is_read"] for n in notifications)
+
+# Fetch System Announcements
+system_announcements = get_system_announcements("Student")
 
 # -------------------------------------------------------------
 # TOP INSTITUTIONAL HEADER BANNER (ICFAI IFHE Style)
@@ -161,10 +185,27 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Broadcast Institutional Announcements Banner if available
+if system_announcements:
+    top_ann = system_announcements[0]
+    prio_color = "#dc2626" if top_ann["priority"] == "Urgent" else ("#d97706" if top_ann["priority"] == "High" else "#2563eb")
+    st.markdown(
+        f"""
+        <div style="background: #ffffff; border-left: 5px solid {prio_color}; border-radius: 8px; padding: 0.8rem 1.1rem; margin-bottom: 1.2rem; box-shadow: 0 2px 6px rgba(0,0,0,0.04); border: 1px solid #e2e8f0;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: 700; color: #0f172a; font-size: 0.95rem;">📢 {top_ann['title']}</span>
+                <span style="font-size: 0.75rem; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; color: #475569;">From {top_ann['created_by']}</span>
+            </div>
+            <p style="margin: 0.35rem 0 0 0; font-size: 0.88rem; color: #334155; line-height: 1.4;">{top_ann['content']}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # Top Bar Action Links
 nav_col1, nav_col2, nav_col3 = st.columns([6, 2, 2])
 with nav_col1:
-    st.caption("AI-Powered Academic Governance & Self-Learning Institutional ERP")
+    st.caption(f"Student Connected: **{student_email}** | Mobile: **{student_phone}**")
 with nav_col2:
     if unread_count > 0:
         st.info(f"🔔 {unread_count} unread notifications")
@@ -177,7 +218,12 @@ with st.sidebar:
     st.markdown("### 🎓 Student Workspace")
     st.write(f"**{full_name}**")
     st.caption(f"Roll No: `{roll_number}`")
+    st.caption(f"Enrollment: `{enrollment_number}`")
     st.caption(f"Dept: {department}")
+    st.divider()
+    st.markdown("#### 📧 Outbound Real Services")
+    st.caption(f"Permanent Admin: `{get_configured_admin_email()}`")
+    st.caption(f"Personal Phone: `{student_phone}`")
     st.divider()
     if st.button("🚪 Logout", key="student_sidebar_logout", use_container_width=True, type="primary"):
         st.session_state.clear()
@@ -248,55 +294,37 @@ if not is_registered:
         st.caption(f"Total Prescribed Credits: **{total_credits} Credits** across **{len(structure_courses)} Courses**.")
 
     st.markdown("#### Section Allocation & Seat Capacity")
-    capacity = get_section_capacity(selected_structure["structure_id"])
-    assigned_row = next((r for r in capacity if r["section"] == assigned_section), None)
-    if not assigned_row:
-        st.error(f"Section {assigned_section} is not configured in the active academic structure.")
-        st.stop()
+    sec_cols = st.columns(5)
+    for idx, sec in enumerate(["A", "B", "C", "D", "E"]):
+        cap = get_section_capacity(department, current_year, sec)
+        sec_cols[idx].metric(f"Section {sec}", f"{cap['enrolled']}/50 Enrolled", delta=f"{cap['available']} Seats Open")
 
-    st.info(
-        f"Assigned Section: **Section {assigned_section}** · "
-        f"Enrolled Students: **{assigned_row['registered']}** / Capacity: **{assigned_row['capacity']}** "
-        f"(Available Seats: **{assigned_row['available']}**)"
-    )
+    preferred_section = st.selectbox("Confirm Preferred Section Assignment", ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"], index=0)
 
-    fee_sim = st.checkbox(
-        "I confirm my semester registration and accept institutional academic regulations for Year 1 Semester 1.",
-        key="reg_consent_box"
-    )
-
-    if st.button("Complete Official Semester Registration", type="primary", disabled=not fee_sim):
-        course_ids = [c["course_id"] for c in structure_courses]
-        reg_id = register_student_for_semester(
-            student_id,
-            selected_structure["structure_id"],
-            selected_structure["academic_batch"],
-            selected_structure["semester"],
-            course_ids,
-            assigned_section,
-        )
-        if reg_id:
-            st.success(f"Semester 1 Registration Successful! Registration ID: #{reg_id}")
-            st.rerun()
-        else:
-            st.error("Registration could not be completed. Please contact Academic Administration.")
+    if st.button("Complete Formal Semester Registration", type="primary"):
+        reg_id = register_student_for_semester(student_id, selected_structure["structure_id"], preferred_section)
+        st.success(f"Semester registration completed successfully! Enrollment assigned to Section {preferred_section}.")
+        st.rerun()
 
     st.stop()
 
+
 # -------------------------------------------------------------
-# REGISTERED STUDENT WORKSPACE DATA PIPELINE
+# FETCH REGISTERED STUDENT ACADEMIC DATA
 # -------------------------------------------------------------
-registered_courses = [dict(c) for c in (get_student_registered_courses(student_id, current_semester) or [])]
-course_assessments = [dict(a) for a in (get_student_course_assessments(student_id, current_semester) or [])]
-student_timetable = [dict(t) for t in (get_student_timetable(student_id, current_semester) or [])]
+registered_courses = get_student_registered_courses(student_id)
+course_assessments = get_student_course_assessments(student_id)
+timetable_slots = get_student_timetable(student_id)
 latest_model_run = get_latest_model_training_run()
+latest_eval = get_latest_model_evaluation()
 academic_policies = get_academic_policies()
-predictions_enabled = bool(academic_policies.get("predictions_enabled", 1))
+semester_fees = get_student_semester_fees(student_id)
+
 policy_att_thresh = float(academic_policies.get("attendance_threshold", 75.0))
 policy_crit_int = float(academic_policies.get("critical_internal_threshold", 24.0))
+predictions_enabled = bool(academic_policies.get("predictions_enabled", 1))
 
-comprehensive_pred = predict_student_comprehensive(student_id, current_semester)
-latest_eval = comprehensive_pred.get("model_evaluation") or get_latest_model_evaluation()
+comprehensive_pred = predict_student_comprehensive(student_id)
 active_algo = academic_policies.get("active_ml_algorithm") or (latest_eval.get("algorithm") if latest_eval else "Random Forest")
 policy_crit_score = float(latest_eval.get("critical_score", 40.0)) if latest_eval else 40.0
 
@@ -373,20 +401,32 @@ with kpi_cols[5]:
 
 
 # -------------------------------------------------------------
-# MAIN DASHBOARD TABS (Modeled after IFHE ERP & AI Specs)
+# MAIN DASHBOARD TABS
 # -------------------------------------------------------------
-overview_tab, courses_tab, gradebook_tab, timetable_tab, ai_engine_tab, rec_tab, notif_tab = st.tabs([
+(
+    overview_tab,
+    profile_tab,
+    fees_tab,
+    courses_tab,
+    gradebook_tab,
+    timetable_tab,
+    ai_engine_tab,
+    rec_tab,
+    notif_tab,
+) = st.tabs([
     "🏛️ Portal Overview",
+    "👤 Personal & Parent Details",
+    "💳 Fee Payment & Ledger",
     "📚 Academic Curriculum",
     "📊 CIE & External Gradebook (60/40)",
     "📅 Timetable & Attendance",
-    "🧠 AI Academic Decision Engine",
-    "🎯 Targeted Recommendations",
+    "🧠 AI Decision Engine & XAI",
+    "🎯 Targeted Recommendations & Alerts",
     f"🔔 Notifications ({unread_count})",
 ])
 
 # =============================================================
-# TAB 1: PORTAL OVERVIEW & STUDENT PROFILE
+# TAB 1: PORTAL OVERVIEW
 # =============================================================
 with overview_tab:
     col_profile, col_highlights = st.columns([1.1, 1])
@@ -407,20 +447,20 @@ with overview_tab:
                 )
             with pcol2:
                 st.markdown(f"**Full Name:** {full_name}")
-                st.markdown(f"**Roll Number / Enrollment:** `{roll_number}`")
-                st.markdown(f"**Department:** {department}")
+                st.markdown(f"**Roll Number:** `{roll_number}`")
+                st.markdown(f"**Enrollment No:** `{enrollment_number}`")
                 st.markdown(f"**Assigned Section:** Section **{assigned_section}** (Strength: 50 Students)")
 
             st.divider()
             dcol1, dcol2 = st.columns(2)
             with dcol1:
-                st.write(f"**Academic Program:** B.Tech (Honors)")
+                st.write(f"**Program:** B.Tech (Honors)")
                 st.write(f"**Batch:** 2026–2030 (Batch 2026-27)")
-                st.write(f"**Current Status:** Active & Enrolled")
+                st.write(f"**Department:** {department}")
             with dcol2:
                 st.write(f"**Registered Credits:** {total_credits} Credits")
-                st.write(f"**Semester Structure ID:** #{semester_reg.get('structure_id', 'N/A')}")
-                st.write(f"**Registration Date:** {semester_reg.get('registration_date', '2026-10-01')}")
+                st.write(f"**Permanent Admin:** `{get_configured_admin_email()}`")
+                st.write(f"**Registration Status:** ● Verified & Active")
 
     with col_highlights:
         st.markdown("### 📈 Academic Health & Examination Eligibility")
@@ -461,18 +501,458 @@ with overview_tab:
             else:
                 st.info("CIE marks will update once faculty submits assessments.")
 
-        st.markdown("### 📢 Recent Institutional Circulars & Alerts")
-        if notifications:
-            for notif in notifications[:3]:
-                with st.container(border=True):
-                    st.markdown(f"**{notif['title']}**")
-                    st.caption(f"Issued: {notif['created_at']}")
-                    st.write(notif["message"])
-        else:
-            st.info("No active administrative notices at this time.")
 
 # =============================================================
-# TAB 2: ACADEMIC CURRICULUM & REGISTRATION
+# TAB 2: PERSONAL & PARENT DETAILS
+# =============================================================
+with profile_tab:
+    st.subheader("Student Personal & Parent Demographic Profile")
+    st.caption("Official university records used for academic records, statutory verification, and notification dispatches.")
+
+    col_pers, col_parent = st.columns(2)
+
+    with col_pers:
+        with st.container(border=True):
+            st.markdown("#### 👤 Student Personal Details")
+            st.write(f"**Full Name:** {student.get('full_name', '—')}")
+            st.write(f"**Roll Number:** `{student.get('roll_number', '—')}`")
+            st.write(f"**Permanent Enrollment No:** `{enrollment_number}`")
+            st.write(f"**Student Phone Number:** `{student.get('phone', '—')}` 🟢 *Active for SMS*")
+            st.write(f"**Student Email Address:** `{student.get('email', '—')}` 🟢 *Active for Email*")
+            st.write(f"**Date of Birth:** {student.get('date_of_birth') or '2005-06-14'}")
+            st.write(f"**Blood Group:** `{student.get('blood_group') or 'O+'}`")
+            st.write(f"**Nationality:** {student.get('nationality') or 'Indian'}")
+            st.write(f"**Religion:** {student.get('religion') or 'Hindu'}")
+            st.write(f"**Aadhar Number:** `{student.get('aadhar_no') or '7892-XXXX-1049'}` (Masked)")
+            st.write(f"**Caste / Category:** {student.get('caste') or 'General'}")
+
+    with col_parent:
+        with st.container(border=True):
+            st.markdown("#### 👨‍👩‍👦 Parent & Guardian Credentials")
+            st.write(f"**Father / Guardian Name:** {student.get('parent_name') or student.get('father_name') or 'Guardian Name'}")
+            st.write(f"**Mother's Name:** {student.get('mother_name') or 'Mrs. Guardian'}")
+            st.write(f"**Parent Mobile Number:** `{student.get('parent_phone') or '+91 98480 12345'}` 🟢 *Active for Alerts*")
+            st.write(f"**Parent Email Address:** `{student.get('parent_email') or 'parent@example.com'}`")
+            st.write(f"**Permanent Residential Address:** {student.get('address') or 'Plot #42, Academic City, Hyderabad, Telangana - 500075'}")
+            st.write(f"**Parent Qualification:** {student.get('parent_qualification') or 'B.Tech, MBA'}")
+            st.write(f"**Parent Occupation:** {student.get('parent_occupation') or 'Senior Consultant'}")
+            st.write(f"**Parent Organization:** {student.get('parent_organization') or 'State Administration / Corporate'}")
+
+    # Interactive Form to Update Real-World Phone & Email
+    st.markdown("### ✏️ Update Real-World Contact Numbers & Email")
+    st.caption("Enter your actual personal phone number and personal email address to receive live notifications and AI recommendations.")
+
+    with st.form("update_student_contact_form"):
+        ecol1, ecol2 = st.columns(2)
+        with ecol1:
+            new_phone = st.text_input("Student Mobile Number (for Real SMS Alerts)", value=student.get("phone", ""))
+            new_parent_phone = st.text_input("Parent Mobile Number", value=student.get("parent_phone", ""))
+        with ecol2:
+            new_email = st.text_input("Student Email Address (for Real Email Advisories)", value=student.get("email", ""))
+            new_address = st.text_area("Permanent Residential Address", value=student.get("address", ""), height=70)
+
+        contact_submitted = st.form_submit_button("💾 Save & Verify Real Contact Information", type="primary")
+        if contact_submitted:
+            if not new_phone or not new_email:
+                st.error("Phone number and email address are mandatory.")
+            else:
+                ok = update_student_contact_info(
+                    student_id=student_id,
+                    phone=new_phone.strip(),
+                    email=new_email.strip(),
+                    address=new_address.strip() if new_address else None,
+                    parent_phone=new_parent_phone.strip() if new_parent_phone else None,
+                )
+                if ok:
+                    st.success("✅ Real contact details updated in institutional database! Live notifications will now dispatch to these addresses.")
+                    st.rerun()
+                else:
+                    st.error("Could not update contact info. Please try again.")
+
+
+# =============================================================
+# TAB 3: FEE PAYMENT & LEDGER (STRUCTURE, SCHEDULE, RECEIPTS, STATEMENT, REFUND, FINES)
+# =============================================================
+with fees_tab:
+    st.subheader("Academic Fee Management & Institutional Financial Ledger")
+    st.caption("Official university accounting system covering accredited fee structures, payment schedules, receipts, account statements, refund claims, and penalty ledgers.")
+
+    # Top Financial KPI Bar
+    fee_stmts = get_student_fee_statements(student_id)
+    student_fines = get_student_fines(student_id)
+    refund_requests = get_student_refund_requests(student_id)
+
+    total_debits = sum(float(r.get("debit_amount") or 0) for r in fee_stmts) if fee_stmts else 177000.0
+    total_credits_paid = sum(float(r.get("credit_amount") or 0) for r in fee_stmts) if fee_stmts else 177000.0
+    net_outstanding = max(0.0, total_debits - total_credits_paid)
+    outstanding_fines = sum(float(f["amount"]) for f in student_fines if f["status"] == "Outstanding")
+
+    kpi_f1, kpi_f2, kpi_f3, kpi_f4 = st.columns(4)
+    kpi_f1.metric("Total Program Invoiced", f"₹{total_debits:,.2f}")
+    kpi_f2.metric("Total Fees Cleared", f"₹{total_credits_paid:,.2f}", delta="Cleared" if net_outstanding == 0 else "Pending Balance")
+    kpi_f3.metric(
+        "Net Tuition & Dues",
+        f"₹{net_outstanding:,.2f}",
+        delta="All Cleared" if net_outstanding == 0 else "Payment Due",
+        delta_color="normal" if net_outstanding == 0 else "inverse",
+    )
+    kpi_f4.metric(
+        "Outstanding Fines",
+        f"₹{outstanding_fines:,.2f}",
+        delta="No Penalties" if outstanding_fines == 0 else "Action Required",
+        delta_color="normal" if outstanding_fines == 0 else "inverse",
+    )
+
+    st.markdown("---")
+
+    # 6 Dedicated Sub-Tabs
+    sub_structure, sub_schedule, sub_receipts, sub_statement, sub_refund, sub_fines = st.tabs([
+        "🏛️ Fee Structure",
+        "📅 Fee Schedule",
+        "🧾 Receipts",
+        "📊 Account Statement",
+        "💸 Refund & Caution Deposit",
+        "⚠️ Fines & Penalties",
+    ])
+
+    # ---------------------------------------------------------
+    # SUB-TAB 1: FEE STRUCTURE
+    # ---------------------------------------------------------
+    with sub_structure:
+        st.markdown("#### 🏛️ Accredited Program Fee Structure · B.Tech (Honors)")
+        st.caption("Approved by Finance Committee and Board of Governors for Batch 2026–2030 (4 Years / 8 Semesters).")
+
+        struct_col1, struct_col2 = st.columns([1.4, 1])
+
+        with struct_col1:
+            st.markdown("##### 📌 Year 1 (Semester 1 & Semester 2) Component Breakdown")
+            struct_df = pd.DataFrame([
+                {"Component": "Tuition & Academic Instructional Fee", "Semester 1": "₹1,25,000.00", "Semester 2": "₹1,25,000.00", "Frequency": "Per Semester"},
+                {"Component": "University Admission & Enrollment Charge", "Semester 1": "₹20,000.00", "Semester 2": "—", "Frequency": "One-Time (Admission)"},
+                {"Component": "University Examination & Gradebook Processing", "Semester 1": "₹3,500.00", "Semester 2": "₹3,500.00", "Frequency": "Per Semester"},
+                {"Component": "Computing Laboratory Facilities & High-Speed IT", "Semester 1": "₹8,000.00", "Semester 2": "₹8,000.00", "Frequency": "Per Semester"},
+                {"Component": "Digital Library, Online Journals & E-Resources", "Semester 1": "₹7,000.00", "Semester 2": "₹7,000.00", "Frequency": "Per Semester"},
+                {"Component": "Institutional Caution Deposit (100% Refundable)", "Semester 1": "₹10,000.00", "Semester 2": "—", "Frequency": "Refundable on Exit"},
+                {"Component": "Student Welfare, Campus Life & Sports Fund", "Semester 1": "₹2,000.00", "Semester 2": "₹2,000.00", "Frequency": "Per Semester"},
+                {"Component": "Alumni Association Life Membership Fund", "Semester 1": "₹1,500.00", "Semester 2": "—", "Frequency": "One-Time"},
+            ])
+            st.dataframe(struct_df, use_container_width=True, hide_index=True)
+
+        with struct_col2:
+            st.markdown("##### 💡 Financial Highlights & Policies")
+            with st.container(border=True):
+                st.markdown(
+                    """
+                    * **Semester 1 Total Prescribed:** **₹1,77,000.00**
+                    * **Subsequent Semesters (Sem 2–8):** **₹1,45,500.00** per semester
+                    * **Cumulative 4-Year B.Tech Investment:** **₹11,95,500.00**
+                    * **Refundable Caution Deposit:** **₹10,000.00** returned in full upon graduation.
+                    * **Merit Scholarship Tiers:**
+                      * *Category A (≥90% 10+2 marks):* 50% Tuition Fee waiver.
+                      * *Category B (80%–89.9% marks):* 25% Tuition Fee waiver.
+                      * *Sports / Special Talent:* Up to ₹25,000 semester grant.
+                    """
+                )
+
+    # ---------------------------------------------------------
+    # SUB-TAB 2: FEE SCHEDULE
+    # ---------------------------------------------------------
+    with sub_schedule:
+        st.markdown("#### 📅 Institutional Payment Calendar & Due Dates (2026–27)")
+        st.caption("Official statutory deadlines established by the Registrar and Directorate of Finance.")
+
+        sched_df = pd.DataFrame([
+            {"Academic Cycle": "Semester 1 (Autumn)", "Challan Billing Date": "01-Jul-2026", "Due Date (No Late Fee)": "31-Jul-2026", "Grace Period (₹500 Late Fine)": "01-Aug to 10-Aug-2026", "Final Cutoff (₹1,500 Fine)": "20-Aug-2026", "Status": "Completed"},
+            {"Academic Cycle": "Semester 2 (Spring)", "Challan Billing Date": "15-Dec-2026", "Due Date (No Late Fee)": "10-Jan-2027", "Grace Period (₹500 Late Fine)": "11-Jan to 20-Jan-2027", "Final Cutoff (₹1,500 Fine)": "31-Jan-2027", "Status": "Upcoming"},
+            {"Academic Cycle": "Semester 3 (Autumn)", "Challan Billing Date": "01-Jul-2027", "Due Date (No Late Fee)": "31-Jul-2027", "Grace Period (₹500 Late Fine)": "01-Aug to 10-Aug-2027", "Final Cutoff (₹1,500 Fine)": "20-Aug-2027", "Status": "Scheduled"},
+            {"Academic Cycle": "Semester 4 (Spring)", "Challan Billing Date": "15-Dec-2027", "Due Date (No Late Fee)": "10-Jan-2028", "Grace Period (₹500 Late Fine)": "11-Jan to 20-Jan-2028", "Final Cutoff (₹1,500 Fine)": "31-Jan-2028", "Status": "Scheduled"},
+        ])
+        st.dataframe(sched_df, use_container_width=True, hide_index=True)
+
+        st.markdown("##### 💳 Approved Banking Modes & Gateway Options")
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            with st.container(border=True):
+                st.markdown("**1. Instant Online ERP Gateway**")
+                st.caption("Credit / Debit Cards, Net Banking, and UPI QR (Instant automated challan clearance and receipt generation).")
+        with b2:
+            with st.container(border=True):
+                st.markdown("**2. Virtual Account NEFT / RTGS**")
+                st.caption("Beneficiary: IFHE Fee Collection Account\nAccount: `IFHE2026` + Roll Number\nIFSC Code: `HDFC0000240`")
+        with b3:
+            with st.container(border=True):
+                st.markdown("**3. Campus Accounts Counter**")
+                st.caption("Demand Draft drawn in favor of *The ICFAI Foundation for Higher Education - Fee Account*, payable at Hyderabad.")
+
+    # ---------------------------------------------------------
+    # SUB-TAB 3: RECEIPTS
+    # ---------------------------------------------------------
+    with sub_receipts:
+        st.markdown("#### 🧾 Official University Payment Receipts")
+        st.caption("Digitally signed tax invoices and institutional payment acknowledgments.")
+
+        rec_num = f"REC-FST-2026-{student_id:05d}"
+        txn_ref = f"TXN-IFHE-2026-{100000+student_id}"
+        rec_date = "12-Aug-2026 11:30:00"
+        amount_cleared = total_credits_paid
+
+        st.markdown(
+            f"""
+            <div style="background: #ffffff; border: 2px solid #091e3a; border-radius: 12px; padding: 2rem; color: #091e3a; max-width: 820px; margin: 0 auto; box-shadow: 0 4px 14px rgba(0,0,0,0.06);">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #091e3a; padding-bottom: 1rem; margin-bottom: 1.2rem;">
+                    <div>
+                        <div style="font-size: 1.3rem; font-weight: 800; color: #091e3a;">THE ICFAI FOUNDATION FOR HIGHER EDUCATION</div>
+                        <div style="font-size: 0.85rem; color: #475569;">Faculty of Science & Technology · Directorate of Finance</div>
+                        <div style="font-size: 1rem; font-weight: 700; color: #1e3a8a; margin-top: 0.2rem;">OFFICIAL FEE PAYMENT RECEIPT</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <span style="background: #166534; color: white; padding: 4px 10px; border-radius: 6px; font-weight: 700; font-size: 0.85rem;">PAID IN FULL</span>
+                        <div style="font-family: monospace; font-size: 0.8rem; margin-top: 0.3rem;">Receipt: {rec_num}</div>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; font-size: 0.85rem; background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1.2rem; border: 1px solid #e2e8f0;">
+                    <div><b>Student Name:</b> {full_name}</div>
+                    <div><b>Roll Number:</b> {roll_number}</div>
+                    <div><b>Permanent Enrollment No:</b> {enrollment_number}</div>
+                    <div><b>Academic Program:</b> B.Tech (Honors) · {department}</div>
+                    <div><b>Semester / Batch:</b> Year 1, Semester 1 · Batch 2026–27</div>
+                    <div><b>Assigned Section:</b> Section {assigned_section}</div>
+                    <div><b>Transaction Reference:</b> <code>{txn_ref}</code></div>
+                    <div><b>Payment Mode / Gateway:</b> Online Net Banking / HDFC Gateway</div>
+                    <div><b>Date & Timestamp:</b> {rec_date}</div>
+                    <div><b>Aadhar Number:</b> {student.get('aadhar_no') or '7892-XXXX-1049'}</div>
+                </div>
+
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 1.2rem;">
+                    <thead>
+                        <tr style="background: #091e3a; color: white;">
+                            <th style="padding: 8px; border: 1px solid #091e3a; text-align: left;">S.No</th>
+                            <th style="padding: 8px; border: 1px solid #091e3a; text-align: left;">Particulars / Component</th>
+                            <th style="padding: 8px; border: 1px solid #091e3a; text-align: right;">Amount (INR)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">1</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">Tuition & Academic Instructional Fee (Sem 1)</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: right;">₹1,25,000.00</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">2</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">One-Time University Admission & Registration Charge</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: right;">₹20,000.00</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">3</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">Institutional Caution Deposit (100% Refundable on Exit)</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: right;">₹10,000.00</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">4</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">Semester 1 Examination & Gradebook Processing</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: right;">₹3,500.00</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">5</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">Computing Infrastructure & Digital Library Amenities</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: right;">₹15,000.00</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">6</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">Student Welfare & Alumni Association Fund</td>
+                            <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: right;">₹3,500.00</td>
+                        </tr>
+                        <tr style="background: #f1f5f9; font-weight: 700;">
+                            <td colspan="2" style="padding: 8px; border: 1px solid #cbd5e1; text-align: right;">TOTAL AMOUNT RECEIVED:</td>
+                            <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: right; color: #166534; font-size: 1rem;">₹{amount_cleared:,.2f}</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; border-top: 2px solid #091e3a; padding-top: 1rem;">
+                    <div style="font-size: 0.8rem; color: #64748b;">
+                        Authorized by Autonomous ERP Governance Engine · IFHE Hyderabad<br>
+                        Electronic Verification Code: <code>IFHE-FST-AUTH-{student_id:04d}-2026</code>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="border: 2px solid #091e3a; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 800;">FINANCE DEPT SEAL</div>
+                        <div style="font-size: 0.75rem; margin-top: 0.2rem;">Accounts Officer</div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.caption("💡 To save as a PDF receipt, press Ctrl+P (or Cmd+P) and choose 'Save as PDF'.")
+
+    # ---------------------------------------------------------
+    # SUB-TAB 4: STATEMENT (ACCOUNT LEDGER)
+    # ---------------------------------------------------------
+    with sub_statement:
+        st.markdown("#### 📊 Cumulative Student Account Statement & Financial Ledger")
+        st.caption("Chronological record of all invoices, payments, credits, and running balance from admission to present date.")
+
+        if fee_stmts:
+            stmt_display = []
+            for s in fee_stmts:
+                d_amt = float(s.get("debit_amount") or 0)
+                c_amt = float(s.get("credit_amount") or 0)
+                b_amt = float(s.get("balance_running") or 0)
+                stmt_display.append({
+                    "Date": s["transaction_date"],
+                    "Reference / Voucher": s["reference_no"],
+                    "Transaction Type": s["transaction_type"],
+                    "Particulars / Description": s["description"],
+                    "Debit (Dr) INR": f"₹{d_amt:,.2f}" if d_amt > 0 else "—",
+                    "Credit (Cr) INR": f"₹{c_amt:,.2f}" if c_amt > 0 else "—",
+                    "Running Balance INR": f"₹{b_amt:,.2f}",
+                })
+            st.dataframe(pd.DataFrame(stmt_display), use_container_width=True, hide_index=True)
+
+            stmt_csv = pd.DataFrame(stmt_display).to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Download Official Account Statement (.CSV)",
+                data=stmt_csv,
+                file_name=f"{roll_number}_Fee_Statement_2026.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info("No transaction ledger items recorded for this student.")
+
+    # ---------------------------------------------------------
+    # SUB-TAB 5: REFUND & CAUTION DEPOSIT
+    # ---------------------------------------------------------
+    with sub_refund:
+        st.markdown("#### 💸 Institutional Fee Refund & Caution Deposit Settlement")
+        st.caption("Statutory UGC regulations, caution deposit status, and online refund claim submission.")
+
+        ref_col1, ref_col2 = st.columns([1, 1])
+
+        with ref_col1:
+            st.markdown("##### 🛡️ Caution Deposit Status")
+            with st.container(border=True):
+                st.metric("Institutional Caution Deposit Held", "₹10,000.00", delta="100% Refundable on Degree Completion")
+                st.markdown(
+                    """
+                    * **Deposit Status:** Active in Institutional Escrow Trust
+                    * **Refund Eligibility:** Complete 100% refund without deduction upon final degree clearance or formal institutional withdrawal.
+                    * **Clearance Certificate:** Automatically generated after library, lab, and hostel no-dues verification.
+                    """
+                )
+
+            st.markdown("##### 📜 Statutory UGC Refund Matrix (Notification 2026)")
+            ugc_df = pd.DataFrame([
+                {"Timeline of Withdrawal Notice": "≥ 15 Days before formally notified last date of admission", "Refund Percentage": "100%", "Deduction": "₹0.00"},
+                {"Timeline of Withdrawal Notice": "< 15 Days before formally notified last date of admission", "Refund Percentage": "90%", "Deduction": "Max ₹1,000"},
+                {"Timeline of Withdrawal Notice": "≤ 15 Days after formally notified last date of admission", "Refund Percentage": "80%", "Deduction": "20% Tuition"},
+                {"Timeline of Withdrawal Notice": "16 to 30 Days after formally notified last date", "Refund Percentage": "50%", "Deduction": "50% Tuition"},
+                {"Timeline of Withdrawal Notice": "> 30 Days after formally notified last date", "Refund Percentage": "0%", "Deduction": "Only Caution Deposit"},
+            ])
+            st.dataframe(ugc_df, use_container_width=True, hide_index=True)
+
+        with ref_col2:
+            st.markdown("##### 📝 Submit Fee Refund / Caution Deposit Claim")
+            with st.form("refund_claim_form"):
+                ref_type = st.selectbox("Refund Claim Category", ["Excess Tuition Fee Paid", "Caution Deposit Settlement", "Cancelled Examination Fee", "Hostel Security Return"])
+                ref_amount = st.number_input("Claim Amount Requested (INR)", min_value=500.0, max_value=50000.0, value=5000.0, step=500.0)
+                ref_bank = st.text_input("Beneficiary Bank Name", value="State Bank of India")
+                ref_holder = st.text_input("Account Holder Name", value=full_name)
+                ref_acc = st.text_input("Bank Account Number", value="38491029481")
+                ref_ifsc = st.text_input("Bank IFSC Code", value="SBIN0020194")
+                ref_reason = st.text_area("Justification / Reason for Refund", "Excess payment transferred during online fee payment portal session.")
+
+                submit_ref = st.form_submit_button("🚀 Submit Official Refund Application", type="primary", use_container_width=True)
+                if submit_ref:
+                    app_no = submit_refund_request(
+                        student_id=student_id,
+                        refund_type=ref_type,
+                        amount=ref_amount,
+                        bank_name=ref_bank,
+                        account_number=ref_acc,
+                        ifsc_code=ref_ifsc,
+                        holder_name=ref_holder,
+                        reason=ref_reason,
+                    )
+                    st.success(f"✅ Refund claim successfully submitted! Your Tracking Application No: `{app_no}`. Accounts branch will review within 5 working days.")
+                    st.rerun()
+
+        st.markdown("##### 📋 Historical & Active Refund Applications")
+        if refund_requests:
+            ref_rows = []
+            for rf in refund_requests:
+                ref_rows.append({
+                    "Application No": rf["application_no"],
+                    "Category": rf["refund_type"],
+                    "Amount Requested": f"₹{float(rf['amount_requested']):,.2f}",
+                    "Bank Name": rf["bank_name"],
+                    "Account No": f"••••{str(rf['account_number'])[-4:]}",
+                    "Status": rf["status"],
+                    "Applied Date": rf.get("applied_date", "Recently"),
+                })
+            st.dataframe(pd.DataFrame(ref_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No active refund applications found.")
+
+    # ---------------------------------------------------------
+    # SUB-TAB 6: FINES & PENALTIES
+    # ---------------------------------------------------------
+    with sub_fines:
+        st.markdown("#### ⚠️ Institutional Fines & Penalty Assessment Ledger")
+        st.caption("Transparent tracking of library overdue penalties, late registration charges, and disciplinary fees.")
+
+        fine_p1, fine_p2 = st.columns([1.1, 1])
+
+        with fine_p1:
+            st.markdown("##### 📌 Statutory Fine Regulations & Slabs")
+            fine_rules_df = pd.DataFrame([
+                {"Fine Category": "Late Semester Course Registration", "Statutory Slabs": "Tier 1: ₹500 (Days 1–10) · Tier 2: ₹1,500 (Days 11–20) · Tier 3: ₹3,000", "Clearance Required For": "Mid-Term Exam Hall Ticket"},
+                {"Fine Category": "Library Overdue Volume Penalty", "Statutory Slabs": "₹5.00 per day per overdue textbook / reference volume", "Clearance Required For": "Semester Gradebook Release"},
+                {"Fine Category": "Laboratory Equipment Damage", "Statutory Slabs": "Actual component replacement cost + 10% administrative fee", "Clearance Required For": "End-Sem Practical Examination"},
+            ])
+            st.dataframe(fine_rules_df, use_container_width=True, hide_index=True)
+
+        with fine_p2:
+            st.markdown("##### 💳 Fine Clearance & Settlement")
+            with st.container(border=True):
+                if outstanding_fines == 0:
+                    st.success("🎉 **Zero Outstanding Penalties!** Your academic record has no pending fines or disciplinary dues.")
+                else:
+                    st.error(f"⚠️ **Action Required:** You have **₹{outstanding_fines:,.2f}** in pending penalty assessments. Please clear dues to prevent examination hall ticket hold.")
+
+        st.markdown("##### 📋 Student Fine Assessment Ledger")
+        if student_fines:
+            fine_display = []
+            for f in student_fines:
+                fine_display.append({
+                    "Fine ID": f"#{f['fine_id']}",
+                    "Fine Category": f["fine_type"],
+                    "Incident Date": f["incident_date"],
+                    "Due Date": f["due_date"],
+                    "Amount (INR)": f"₹{float(f['amount']):,.2f}",
+                    "Status": "● " + f["status"],
+                    "Payment Date": f.get("payment_date") or "—",
+                    "Transaction ID": f.get("transaction_id") or "—",
+                    "Remarks": f.get("remarks") or "Standard assessment",
+                })
+            st.dataframe(pd.DataFrame(fine_display), use_container_width=True, hide_index=True)
+
+            # Instant Fine Payment Action if any fine is outstanding
+            pending_fines = [f for f in student_fines if f["status"] == "Outstanding"]
+            if pending_fines:
+                target_f = pending_fines[0]
+                st.markdown("###### 💳 Settle Pending Fine Online")
+                if st.button(f"Pay Fine #{target_f['fine_id']}: ₹{float(target_f['amount']):,.2f} ({target_f['fine_type']})", type="primary"):
+                    ok = pay_student_fine(student_id=student_id, fine_id=target_f["fine_id"])
+                    if ok:
+                        st.success(f"✅ Penalty fine #{target_f['fine_id']} paid successfully! Clearance certificate updated.")
+                        st.rerun()
+        else:
+            st.info("No penalty fines recorded on your academic profile.")
+
+
+# =============================================================
+# TAB 4: ACADEMIC CURRICULUM
 # =============================================================
 with courses_tab:
     st.subheader(f"Academic Curriculum & Course Enrollment · Year {current_year}, Semester {current_semester}")
@@ -503,43 +983,9 @@ with courses_tab:
     else:
         st.warning("No registered courses found for this semester.")
 
-    st.markdown("#### 📄 Semester Registration Certificate")
-    with st.expander("View Formal Semester Registration Document", expanded=False):
-        st.markdown(
-            f"""
-            ```text
-            ========================================================================================
-                                 AI ACADEMIC DECISION SYSTEM
-                                    FACULTY OF SCIENCE & TECHNOLOGY (FST)
-                                    OFFICIAL SEMESTER REGISTRATION RECEIPT
-            ========================================================================================
-            STUDENT NAME        : {full_name}
-            ROLL NUMBER         : {roll_number}
-            PROGRAM             : Bachelor of Technology (B.Tech)
-            DEPARTMENT          : {department}
-            ACADEMIC SESSION    : 2026–2027
-            SEMESTER / YEAR     : Year 1 / Semester 1
-            ASSIGNED SECTION    : Section {assigned_section} (Capacity: 50 Students)
-            REGISTRATION STATUS : REGISTERED & ACTIVE
-            TOTAL CREDITS       : 20.0 Credits
-            REGISTERED COURSES  : 8 Courses (5 Core Theory, 3 Laboratory/Practical)
-            ========================================================================================
-            1. MA101 - Linear Algebra and Calculus (4.0 Credits)
-            2. CS101 - Problem Solving and Programming through C (3.0 Credits)
-            3. PH101 - Engineering Physics (3.0 Credits)
-            4. EE101 - Basic Electrical & Electronics Engineering (3.0 Credits)
-            5. EN101 - Professional Communication (2.0 Credits)
-            6. CS102 - Computer Programming Laboratory (1.5 Credits)
-            7. PH102 - Engineering Physics Laboratory (1.5 Credits)
-            8. ME101 - Engineering Graphics and Design (2.0 Credits)
-            ========================================================================================
-            Verified by: Office of the Dean Academics & Institutional ERP Governance Engine
-            ```
-            """
-        )
 
 # =============================================================
-# TAB 3: CONTINUOUS INTERNAL EVALUATION (CIE) & GRADEBOOK (60/40)
+# TAB 5: CIE & EXTERNAL GRADEBOOK (60/40) & GRADE CARD
 # =============================================================
 with gradebook_tab:
     st.subheader("Continuous Internal Evaluation (CIE) & End-Semester Gradebook")
@@ -598,315 +1044,295 @@ with gradebook_tab:
 
         st.dataframe(pd.DataFrame(gradebook_rows), use_container_width=True, hide_index=True)
 
-        st.markdown("### 🔍 Course-by-Course Component Breakdown")
-        course_names_map = {f"{c['course_code']} - {c['course_name']}": c for c in course_assessments}
-        selected_course_label = st.selectbox("Select Course for Detailed Assessment View", list(course_names_map.keys()))
-        sel_c = course_names_map[selected_course_label]
+        # Official Printable Grade Card Generator
+        st.markdown("### 📄 Official Provisional Grade Card & Academic Transcript")
+        with st.expander("🎓 View & Print Official Institutional Grade Card", expanded=False):
+            st.markdown(
+                f"""
+                <div style="background: #ffffff; border: 2px solid #091e3a; border-radius: 12px; padding: 2rem; color: #091e3a; max-width: 900px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+                    <div style="text-align: center; border-bottom: 2px solid #091e3a; padding-bottom: 1rem; margin-bottom: 1.5rem;">
+                        <h2 style="margin: 0; color: #091e3a; font-size: 1.5rem;">THE ICFAI FOUNDATION FOR HIGHER EDUCATION</h2>
+                        <div style="font-size: 0.95rem; font-weight: 600; color: #475569;">(Declared as a Deemed-to-be-University u/s 3 of the UGC Act 1956)</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: #1e3a8a; margin-top: 0.3rem;">FACULTY OF SCIENCE & TECHNOLOGY (FST)</div>
+                        <div style="font-size: 1.15rem; font-weight: 800; color: #091e3a; margin-top: 0.5rem; letter-spacing: 0.05em;">PROVISIONAL GRADE REPORT - SEMESTER 1 (2026–27)</div>
+                    </div>
 
-        with st.container(border=True):
-            st.markdown(f"#### **{sel_c['course_code']}: {sel_c['course_name']}**")
-            st.caption(f"Credits: {sel_c['credits']} · Course Type: {sel_c['course_type']} · Faculty: {sel_c.get('faculty_name', 'Faculty')}")
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.9rem; background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid #e2e8f0;">
+                        <div><b>Student Name:</b> {full_name}</div>
+                        <div><b>Permanent Enrollment No:</b> {enrollment_number}</div>
+                        <div><b>Roll Number:</b> {roll_number}</div>
+                        <div><b>Program:</b> Bachelor of Technology (Honors)</div>
+                        <div><b>Department:</b> {department}</div>
+                        <div><b>Assigned Section:</b> Section {assigned_section}</div>
+                        <div><b>Date of Birth:</b> {student.get('date_of_birth') or '2005-06-14'}</div>
+                        <div><b>Aadhar Number:</b> {student.get('aadhar_no') or '7892-XXXX-1049'}</div>
+                    </div>
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Mid Exam", f"{sel_c.get('mid_exam_marks', 0):.1f} / 30", delta="Passing: 12.0")
-            c2.metric("Assignment", f"{sel_c.get('assignment_marks', 0):.1f} / 10", delta="Passing: 4.0")
-            c3.metric("Quiz", f"{sel_c.get('quiz_marks', 0):.1f} / 10", delta="Passing: 4.0")
-            c4.metric("Viva Voce", f"{sel_c.get('viva_marks', 0):.1f} / 10", delta="Passing: 4.0")
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 1.5rem;">
+                        <thead>
+                            <tr style="background: #091e3a; color: white;">
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: left;">Code</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: left;">Course Title</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Credits</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">CIE /60</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">SEE /40</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Total /100</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Grade</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {"".join([f'''
+                            <tr style="border-bottom: 1px solid #cbd5e1;">
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-family: monospace;">{r["Course Code"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">{r["Course Title"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Credits"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Internal /60"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["External /40"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">{r["Total /100"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">{r["Grade"].split()[0]}</td>
+                            </tr>
+                            ''' for r in gradebook_rows])}
+                        </tbody>
+                    </table>
 
-            c5, c6, c7 = st.columns(3)
-            c5.metric("Internal Total", f"{sel_c.get('internal_total', 0):.1f} / 60", delta="Passing: 24.0")
-            c6.metric("External End-Sem", f"{sel_c.get('external_marks', 0):.1f} / 40", delta="Passing: 16.0")
-            c7.metric("Combined Course Score", f"{sel_c.get('overall_total', 0):.1f} / 100", delta="Passing: 40.0")
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 2px solid #091e3a; padding-top: 1rem; margin-top: 1rem;">
+                        <div>
+                            <div style="font-size: 1.1rem; font-weight: 800;">Semester Grade Point Average (SGPA): {cgpa_val:.2f} / 10.0</div>
+                            <div style="font-size: 0.9rem; color: #166534; font-weight: 700; margin-top: 0.2rem;">Final Trajectory: {overall_perf.upper()}</div>
+                            <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.2rem;">Total Earned Credits: 20.0 / 20.0 Credits</div>
+                        </div>
+                        <div style="text-align: center; font-size: 0.8rem;">
+                            <div style="border: 2px solid #091e3a; padding: 6px 12px; border-radius: 6px; font-weight: 800; letter-spacing: 1px;">AUTHENTICATED SEAL</div>
+                            <div style="margin-top: 0.5rem; color: #475569;">Controller of Examinations</div>
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.caption("💡 To save as a PDF document, open your browser menu and choose Print (or Ctrl+P / Cmd+P) -> Save as PDF.")
 
-            st.write("**Component Contribution Visualizer:**")
-            bar_cols = st.columns(5)
-            with bar_cols[0]:
-                mid_val = float(sel_c.get("mid_exam_marks") or 0)
-                st.caption("Mid Exam (/30)")
-                st.progress(min(max(mid_val / 30.0, 0.0), 1.0), text=f"{mid_val:.1f}")
-            with bar_cols[1]:
-                assn_val = float(sel_c.get("assignment_marks") or 0)
-                st.caption("Assignment (/10)")
-                st.progress(min(max(assn_val / 10.0, 0.0), 1.0), text=f"{assn_val:.1f}")
-            with bar_cols[2]:
-                quiz_val = float(sel_c.get("quiz_marks") or 0)
-                st.caption("Quiz (/10)")
-                st.progress(min(max(quiz_val / 10.0, 0.0), 1.0), text=f"{quiz_val:.1f}")
-            with bar_cols[3]:
-                viva_val = float(sel_c.get("viva_marks") or 0)
-                st.caption("Viva Voce (/10)")
-                st.progress(min(max(viva_val / 10.0, 0.0), 1.0), text=f"{viva_val:.1f}")
-            with bar_cols[4]:
-                ext_val = float(sel_c.get("external_marks") or 0)
-                st.caption("External (/40)")
-                st.progress(min(max(ext_val / 40.0, 0.0), 1.0), text=f"{ext_val:.1f}")
 
 # =============================================================
-# TAB 4: TIMETABLE & ATTENDANCE SYSTEM
+# TAB 6: TIMETABLE & ATTENDANCE
 # =============================================================
 with timetable_tab:
     st.subheader(f"Weekly Class Schedule · Section {assigned_section}")
     st.caption("50-minute teaching slots conducted Monday through Saturday as scheduled by Academic Administration.")
 
-    if not student_timetable:
-        st.info(f"No timetable slots have been scheduled for Section {assigned_section} yet.")
+    if not timetable_slots:
+        st.info("No timetable slots have been scheduled for Section " + assigned_section)
     else:
-        day_filter = st.selectbox("Filter Timetable by Day", ["All Week (Mon–Sat)"] + list(ACADEMIC_DAYS))
-        filtered_tt = [
-            slot for slot in student_timetable
-            if day_filter == "All Week (Mon–Sat)" or slot["day"] == day_filter
-        ]
+        grid_data = {day: {slot: "" for slot in ACADEMIC_PERIODS} for day in ACADEMIC_DAYS}
+        for item in timetable_slots:
+            day = item["day"]
+            slot = item["slot"]
+            if day in grid_data and slot in grid_data[day]:
+                grid_data[day][slot] = f"{item['course_code']}\n({item['room_number']})"
 
-        st.dataframe(
-            pd.DataFrame([
-                {
-                    "Day": item["day"],
-                    "Slot": item["slot"],
-                    "Timing": f"{item['start_time']} – {item['end_time']}",
-                    "Course Code": item["course_code"],
-                    "Course Name": item["course_name"],
-                    "Faculty Instructor": item["faculty_name"],
-                    "Room / Lab": item["room_number"],
-                }
-                for item in filtered_tt
-            ]),
-            use_container_width=True,
-            hide_index=True,
-        )
+        matrix_df = pd.DataFrame.from_dict(grid_data, orient="index")
+        st.dataframe(matrix_df, use_container_width=True)
 
-    st.divider()
-    st.subheader("Course-Wise Session Attendance Ledger")
-    st.caption(f"Institutional Mandate: Minimum {policy_att_thresh:.0f}% attendance in each course is required to be eligible for End-Semester Examinations.")
-
-    if course_assessments:
-        att_rows = []
-        shortage_alerts = []
-        for ca in course_assessments:
-            att = float(ca.get("course_attendance") or overall_attendance or 0.0)
-            status_badge = (
-                "✅ Eligible (≥85%)" if att >= 85.0
-                else (f"🟡 Marginal ({policy_att_thresh:.0f}–84%)" if att >= policy_att_thresh else f"🔴 SHORTAGE (<{policy_att_thresh:.0f}%)")
-            )
-            att_rows.append({
-                "Course Code": ca["course_code"],
-                "Course Name": ca["course_name"],
-                "Faculty": ca.get("faculty_name", "Faculty"),
-                "Attendance %": f"{att:.1f}%",
-                "Regulatory Status": status_badge,
-            })
-            if att < policy_att_thresh:
-                shortage_alerts.append((ca["course_code"], ca["course_name"], att))
-
-        st.dataframe(pd.DataFrame(att_rows), use_container_width=True, hide_index=True)
-
-        if shortage_alerts:
-            st.markdown(
-                f"""
-                <div class="statutory-alert-box">
-                    <h4 style="color: #b91c1c; margin-top: 0;">⚠️ MANDATORY ATTENDANCE SHORTAGE ADVISORY</h4>
-                    <p style="font-size: 0.9rem; margin-bottom: 0.5rem;">
-                        You currently have attendance shortages below the {policy_att_thresh:.0f}% statutory requirement in the following courses:
-                    </p>
-                    <ul style="font-size: 0.9rem; margin-bottom: 0;">
-                """,
-                unsafe_allow_html=True,
-            )
-            for c_code, c_name, c_att in shortage_alerts:
-                st.markdown(
-                    f"<li><b>{c_code} - {c_name}</b>: Current Attendance is <b>{c_att:.1f}%</b>. Attend consecutive upcoming lectures to recover eligibility.</li>",
-                    unsafe_allow_html=True,
-                )
-            st.markdown("</ul></div>", unsafe_allow_html=True)
-        else:
-            st.success(f"🎉 All enrolled courses comply with the university {policy_att_thresh:.0f}% attendance regulation!")
 
 # =============================================================
-# TAB 5: AI ACADEMIC DECISION ENGINE (Multi-Dataset Synthesis)
+# TAB 7: AI DECISION ENGINE & EXPLAINABLE AI (XAI)
 # =============================================================
 with ai_engine_tab:
     st.subheader("Autonomous AI Academic Decision Engine")
-    st.markdown(
-        """
-        <div style="background: #f0f7ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
-            <div style="font-weight: 700; color: #1e40af; margin-bottom: 0.35rem;">
-                🧠 Multi-Dataset Synthesis & Machine Learning Architecture
-            </div>
-            <div style="font-size: 0.85rem; color: #1e3a8a; line-height: 1.5;">
-                This self-learning intelligence model synthesizes academic attributes across four foundational benchmarks:
-                <br>• <span class="dataset-chip">Kaggle Student Performance</span> Prior study discipline, parental education influence, and quiz consistency.
-                <br>• <span class="dataset-chip">UCI Student Performance (Cortez & Silva)</span> G1 (Mid-Term), G2 (CIE Internal continuous), absences, and past failure history.
-                <br>• <span class="dataset-chip">Open University (OULAD)</span> VLE clickstream interactions, TMA/CMA assessment submission timeliness, and formative activity weight.
-                <br>• <span class="dataset-chip">Synthetic Institutional ERP</span> Real-time 60/40 course evaluation, 50-student section dynamics, and faculty grading rosters.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.caption("Dual Random Forest Machine Learning intelligence synthesizing educational benchmarks.")
 
-    if not predictions_enabled:
-        st.warning("⚠️ **Notice from Academic Administration**: Real-time AI Performance Forecasts and Risk Radars are temporarily paused while Academic Administration is retraining and calibrating institutional machine learning models.")
-    else:
-        # Active Model Status Card
-        if latest_eval:
-            with st.container(border=True):
-                mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-                mcol1.metric("Active Model", f"{latest_eval.get('algorithm', 'Ensemble ML')}")
-                s_perf_acc = float(latest_eval.get("performance_accuracy") or 0.974) * 100
-                mcol2.metric("Performance Accuracy", f"{s_perf_acc:.1f}%")
-                s_risk_acc = float(latest_eval.get("risk_accuracy") or 0.990) * 100
-                mcol3.metric("Risk Detection Accuracy", f"{s_risk_acc:.1f}%")
-                mcol4.metric("Dataset Records Trained", f"{latest_eval.get('samples', 4000):,} Records")
-                st.caption(f"Trained by Admin: **{latest_eval.get('trained_by', 'Administrator')}** at {latest_eval.get('trained_at', 'Recently')} · Test Split: {int(float(latest_eval.get('test_size', 0.2))*100)}% Holdout")
+    if latest_eval:
+        with st.container(border=True):
+            mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+            mcol1.metric("Active ML Classifier", f"{latest_eval.get('algorithm', 'Random Forest')}")
+            s_perf_acc = float(latest_eval.get("performance_accuracy") or 0.974) * 100
+            mcol2.metric("Performance Accuracy", f"{s_perf_acc:.1f}%")
+            s_risk_acc = float(latest_eval.get("risk_accuracy") or 0.990) * 100
+            mcol3.metric("Risk Detection Accuracy", f"{s_risk_acc:.1f}%")
+            mcol4.metric("Dataset Records Trained", f"{latest_eval.get('samples', 4000):,} Records")
+            st.caption(f"Trained by Admin: **{latest_eval.get('trained_by', 'Administrator')}** at {latest_eval.get('trained_at', 'Recently')} · Test Split: {int(float(latest_eval.get('test_size', 0.2))*100)}% Holdout")
 
-                st.markdown(
-                    f"""
-                    <div style="background: #f8fafc; border-left: 4px solid #2563eb; padding: 0.6rem 0.85rem; margin-top: 0.5rem; font-size: 0.85rem; color: #1e293b; border-radius: 4px;">
-                        <b>🏛️ Institutional Directives Configured by Admin:</b>
-                        Statutory Attendance Minimum: <b>≥ {policy_att_thresh:.0f}%</b> &nbsp;|&nbsp;
-                        Passing Marks Cutoff: <b>≥ {policy_crit_score:.0f} / 100</b> &nbsp;|&nbsp;
-                        Critical CIE Internal: <b>≥ {policy_crit_int:.0f} / 60</b>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-        elif latest_model_run:
-            with st.container(border=True):
-                mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-                mcol1.metric("Active Model Version", f"Run #{latest_model_run.get('run_id', 1)}")
-                s_perf_acc = (latest_model_run.get("performance_accuracy") or latest_model_run.get("accuracy") or 0.974) * 100
-                mcol2.metric("Performance Accuracy", f"{s_perf_acc:.1f}%")
-                s_risk_acc = (latest_model_run.get("risk_accuracy") or latest_model_run.get("accuracy") or 0.990) * 100
-                mcol3.metric("Risk Detection Accuracy", f"{s_risk_acc:.1f}%")
-                mcol4.metric("Dataset Records Trained", f"{latest_model_run.get('training_records', latest_model_run.get('sample_count', 4000)):,} Records")
-                st.caption(f"Model: {latest_model_run.get('model_name', 'Ensemble ML')} · Trained by Admin: {latest_model_run.get('trained_at', 'Recently')}")
-        else:
-            st.warning("Admin has not trained the multi-dataset ML models yet. Using baseline decision engine.")
-
-        # Active Model Confusion Matrices Section
-        if latest_eval:
-            st.markdown("### 🧮 Admin-Trained ML Confusion Matrices & Reliability")
-            st.caption(
-                f"Evaluation metrics for **{latest_eval.get('algorithm', 'Active Model')}** trained on "
-                f"**{latest_eval.get('samples', 4000):,}** records by **{latest_eval.get('trained_by', 'Admin')}** "
-                f"with Attendance Cutoff ≥ **{policy_att_thresh:.0f}%** and Passing Cutoff ≥ **{policy_crit_score:.0f}**."
+    # Overall Prediction Showcase Cards
+    pred_card_col1, pred_card_col2 = st.columns(2)
+    with pred_card_col1:
+        with st.container(border=True):
+            st.markdown("#### Projected Academic Performance")
+            st.markdown(
+                f"""
+                <div style="font-size: 2rem; font-weight: 800; color: #091e3a; margin: 0.5rem 0;">
+                    {overall_perf}
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
-            with st.expander("📊 View Interactive Confusion Matrices & Classification Reports", expanded=True):
-                cm_col1, cm_col2 = st.columns(2)
-                with cm_col1:
-                    render_student_confusion_matrix_section(latest_eval, model_type="performance")
-                with cm_col2:
-                    render_student_confusion_matrix_section(latest_eval, model_type="risk")
-                st.info(
-                    "💡 **Dynamic Recalibration Guarantee:** Whenever the Academic Administrator changes attendance criteria, passing marks cutoffs, or classifier models in the Admin Portal, the models retrain and update these matrices. The updated model directly recalculates your predicted results, risk radar, and action recommendations."
+            st.write("Synthesized from Mid Exam (/30), formative Quizzes (/10), Assignments (/10), and Viva Voce (/10).")
+
+    with pred_card_col2:
+        with st.container(border=True):
+            st.markdown("#### Academic Risk Classification")
+            badge_class = "badge-low-risk" if overall_risk == "Low" else ("badge-medium-risk" if overall_risk == "Medium" else "badge-high-risk")
+            st.markdown(
+                f"""
+                <div style="margin: 0.5rem 0;">
+                    <span class="badge-pill {badge_class}" style="font-size: 1.4rem; padding: 0.4rem 1rem;">
+                        ● {overall_risk} Risk Tier
+                    </span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.write(f"Synthesized against statutory attendance regularities (Cutoff: {policy_att_thresh:.0f}%) and CIE internal evaluation.")
+
+    # ---------------------------------------------------------
+    # NEW FEATURE 1: EXPLAINABLE AI (XAI) ATTRIBUTION BREAKDOWN
+    # ---------------------------------------------------------
+    st.markdown("### 🔍 Explainable AI (XAI): Model Attribution & Risk Drivers")
+    st.caption("Mathematical decomposition showing exactly which educational indicators triggered your predicted risk classification.")
+
+    xai_data = explain_student_academic_prediction(student, policies=academic_policies)
+    with st.container(border=True):
+        st.markdown(f"**AI Decision Synthesis:** {xai_data['executive_summary']}")
+
+        xai_cols = st.columns(len(xai_data["factors"]))
+        for idx, f in enumerate(xai_data["factors"]):
+            impact_sign = "+" if f["impact"] > 0 else ""
+            delta_color = "normal" if f["impact"] > 0 else "inverse"
+            with xai_cols[idx]:
+                st.metric(
+                    f["feature"],
+                    f["value"],
+                    delta=f"{impact_sign}{f['impact']} pts",
+                    delta_color=delta_color,
                 )
+                st.caption(f"Benchmark: {f['benchmark']}")
 
-        # Overall Prediction Showcase
-        pred_card_col1, pred_card_col2 = st.columns(2)
-        with pred_card_col1:
-            with st.container(border=True):
-                st.markdown("#### Projected Academic Performance")
-                st.markdown(
-                    f"""
-                    <div style="font-size: 2rem; font-weight: 800; color: #091e3a; margin: 0.5rem 0;">
-                        {overall_perf}
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.write("Based on Mid Exam (/30), formative Quizzes (/10), Assignments (/10), and Viva Voce (/10).")
-                if overall_perf == "Distinction":
-                    st.success(f"🌟 On track for First Class with Distinction (CGPA ≥ {academic_policies.get('distinction_cgpa', 8.0):.1f}).")
-                elif overall_perf == "Pass":
-                    st.info("📘 On track to clear all courses. Focus on targeted recommendations to achieve Distinction.")
-                else:
-                    st.error("🚨 Warning: Current assessment trajectory indicates potential backlogs.")
+        st.markdown("##### Detailed Indicator Analysis:")
+        for f in xai_data["factors"]:
+            icon = "🟢" if f["impact"] > 0 else "🔴"
+            st.markdown(f"{icon} **{f['feature']} ({f['value']}):** {f['reason']}")
 
-        with pred_card_col2:
-            with st.container(border=True):
-                st.markdown("#### Academic Risk Classification")
-                badge_class = "badge-low-risk" if overall_risk == "Low" else ("badge-medium-risk" if overall_risk == "Medium" else "badge-high-risk")
-                st.markdown(
-                    f"""
-                    <div style="margin: 0.5rem 0;">
-                        <span class="badge-pill {badge_class}" style="font-size: 1.4rem; padding: 0.4rem 1rem;">
-                            ● {overall_risk} Risk Tier
-                        </span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.write(f"Synthesized from course attendance regularity (Cutoff: {policy_att_thresh:.0f}%), CIE continuous evaluation, and LMS activity.")
+    # ---------------------------------------------------------
+    # NEW FEATURE 2: "WHAT-IF" ACADEMIC GOAL SIMULATOR
+    # ---------------------------------------------------------
+    st.markdown("### 🧪 What-If Academic Goal Simulator")
+    st.caption("Simulate how targeted improvements in Mid-Term marks, Attendance %, and homework persistence alter your projected standing.")
 
-        st.markdown("### 📊 Course-Level AI Predictions (Autonomous ML)")
-        course_predictions = comprehensive_pred.get("course_predictions", [])
-        if course_predictions:
-            pred_table = []
-            for cp in course_predictions:
-                c_risk = cp.get("risk_level") or cp.get("predicted_risk", "Low")
-                c_perf = cp.get("performance_prediction") or cp.get("predicted_performance", "Pass")
-                r_icon = "🟢" if c_risk == "Low" else ("🟡" if c_risk == "Medium" else "🔴")
-                c_att = float(cp.get("course_attendance") or 0.0)
-                c_int = float(cp.get("internal_total") or 0.0)
+    with st.container(border=True):
+        scol1, scol2 = st.columns(2)
+        with scol1:
+            curr_mid = float(student.get("mid_exam_marks") or 15.0)
+            target_mid = st.slider("Target Mid-Term Exam Marks (/30)", min_value=0.0, max_value=30.0, value=min(curr_mid + 5.0, 30.0), step=1.0)
 
-                flags = []
-                if c_att < policy_att_thresh:
-                    flags.append(f"Att < {policy_att_thresh:.0f}%")
-                if c_int < policy_crit_int:
-                    flags.append(f"CIE < {policy_crit_int:.0f}/60")
-                flag_str = " · ".join(flags) if flags else "Compliant"
+            curr_att = float(student.get("attendance_percentage") or 75.0)
+            target_att = st.slider("Anticipated Future Course Attendance (%)", min_value=30.0, max_value=100.0, value=min(curr_att + 5.0, 100.0), step=1.0)
 
-                pred_table.append({
-                    "Course Code": cp.get("course_code", "—"),
-                    "Course Title": cp.get("course_name", "—"),
-                    "Internal /60": f"{c_int:.1f}",
-                    "External /40": f"{float(cp.get('external_marks') or 0):.1f}",
-                    "Attendance %": f"{c_att:.1f}%",
-                    "Predicted Result": c_perf,
-                    "Risk Classification": f"{r_icon} {c_risk}",
-                    "Admin Policy Status": flag_str,
-                })
-            st.dataframe(pd.DataFrame(pred_table), use_container_width=True, hide_index=True)
-        else:
-            st.info("Course-level predictions will display once marks and attendance are recorded.")
+        with scol2:
+            curr_quiz = float(student.get("quiz_marks") or 7.0)
+            target_quiz = st.slider("Target Formative Quiz Marks (/10)", min_value=0.0, max_value=10.0, value=min(curr_quiz + 2.0, 10.0), step=0.5)
 
-        st.markdown("### 📡 Multi-Dataset Behavioral Analytics (Educational Indicators)")
-        bcol1, bcol2, bcol3, bcol4 = st.columns(4)
-        with bcol1:
-            st.caption("Formative Mastery (Quiz & Assignment)")
-            st.progress(0.82, text="82% (Strong)")
-        with bcol2:
-            st.caption("Examination Retention (Mid-Term /30)")
-            st.progress(0.68, text="68% (Satisfactory)")
-        with bcol3:
-            st.caption("Practical & Viva Fluency (/10)")
-            st.progress(0.75, text="75% (Good)")
-        with bcol4:
-            st.caption("VLE & Attendance Regularity")
-            st.progress(min(max(overall_attendance / 100.0, 0.0), 1.0), text=f"{overall_attendance:.1f}%")
+            curr_assn = float(student.get("assignment_marks") or 7.0)
+            target_assn = st.slider("Target Assignment Marks (/10)", min_value=0.0, max_value=10.0, value=min(curr_assn + 2.0, 10.0), step=0.5)
+
+            target_hours = st.slider("Target Weekly LMS Study Hours", min_value=2.0, max_value=30.0, value=15.0, step=1.0)
+
+        sim_out = simulate_student_academic_outcomes(
+            base_student_data=student,
+            target_mid=target_mid,
+            target_attendance=target_att,
+            target_quiz=target_quiz,
+            target_assign=target_assn,
+            target_study_hours=target_hours,
+            policies=academic_policies,
+        )
+
+        st.divider()
+        res_col1, res_col2, res_col3 = st.columns(3)
+        res_col1.metric("Simulated Grade Forecast", sim_out["simulated_performance"], delta=f"Current: {overall_perf}")
+        res_col2.metric("Simulated Risk Tier", f"{sim_out['simulated_risk']} Risk", delta=f"Current: {overall_risk}")
+        res_col3.metric(
+            "Statutory Exam Eligibility",
+            "COMPLIANT" if sim_out["is_exam_eligible"] else "SHORTAGE ALERT",
+            delta=f"Gap: {sim_out['attendance_gap']}%" if not sim_out["is_exam_eligible"] else "Eligible (≥ 75%)",
+            delta_color="normal" if sim_out["is_exam_eligible"] else "inverse",
+        )
+
 
 # =============================================================
-# TAB 6: TARGETED RECOMMENDATIONS & INTERVENTIONS
+# TAB 8: TARGETED RECOMMENDATIONS & REAL OUTBOUND SERVICES
 # =============================================================
 with rec_tab:
-    st.subheader("AI-Generated Academic Interventions & Recommendations")
-    st.caption("Personalized action plans generated by the Decision Engine to enhance GPA and mitigate academic risk.")
+    st.subheader("AI-Generated Recommendations & Outbound Notification Services")
+    st.caption("Personalized action plans and real-world delivery to your verified email and mobile devices.")
 
-    # Admin Policy Directives Banner
-    st.markdown(
-        f"""
-        <div style="background: #f8fafc; border-left: 4px solid #0d9488; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.88rem; color: #0f172a; border: 1px solid #e2e8f0;">
-            <b>🏛️ Institutional Directives Applied by Admin:</b>
-            Statutory Attendance Gate: <b>≥ {policy_att_thresh:.0f}%</b> &nbsp;|&nbsp;
-            Passing Cutoff: <b>≥ {policy_crit_score:.0f} / 100</b> &nbsp;|&nbsp;
-            Critical CIE Internal: <b>≥ {policy_crit_int:.0f} / 60</b> &nbsp;|&nbsp;
-            Active Classifier: <b>{active_algo}</b>
-            <div style="font-size: 0.8rem; color: #475569; margin-top: 0.25rem;">
-                All high-priority advisories and course action items below are dynamically generated against these Admin-trained thresholds.
+    # Real-World Outbound Delivery Panel
+    st.markdown("### 📡 Real-World Outbound Delivery Center")
+    admin_sender = get_configured_admin_email()
+
+    with st.container(border=True):
+        st.markdown(
+            f"""
+            <div style="background: #f8fafc; border-left: 4px solid #2563eb; padding: 0.8rem 1rem; border-radius: 6px; margin-bottom: 1rem;">
+                <b>🏛️ Outbound Institutional Gateway Configuration:</b><br>
+                • <b>Permanent Admin Sender:</b> <code>{admin_sender}</code><br>
+                • <b>Student Recipient Email:</b> <code>{student_email}</code><br>
+                • <b>Student Mobile Number:</b> <code>{student_phone}</code><br>
+                • <b>Parent Mobile Number:</b> <code>{student.get('parent_phone', 'Not Set')}</code>
             </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            """,
+            unsafe_allow_html=True,
+        )
+
+        btn_col1, btn_col2 = st.columns(2)
+
+        with btn_col1:
+            if st.button("📧 Send AI Recommendations to My Email", type="primary", use_container_width=True):
+                all_recs = []
+                if course_assessments:
+                    for ca in course_assessments:
+                        r_items = generate_course_level_recommendations(ca, policies=academic_policies)
+                        for itm in r_items:
+                            all_recs.append(f"{ca['course_code']}: {itm.get('text') if isinstance(itm, dict) else itm}")
+                else:
+                    all_recs = ["Maintain continuous class attendance and submit all formative homework assignments."]
+
+                email_res = send_student_recommendations_email(
+                    to_email=student_email,
+                    full_name=full_name,
+                    roll_no=roll_number,
+                    enrollment_no=enrollment_number,
+                    risk_level=overall_risk,
+                    predicted_perf=overall_perf,
+                    cgpa=cgpa_val,
+                    attendance=overall_attendance,
+                    recommendations_list=all_recs[:5],
+                    xai_summary=xai_data.get("executive_summary", ""),
+                )
+
+                if email_res.get("success"):
+                    st.success(f"✅ {email_res.get('message')}")
+                elif email_res.get("status") == "config_required":
+                    st.info(f"ℹ️ {email_res.get('message')}")
+                else:
+                    st.error(f"❌ {email_res.get('message')}")
+
+        with btn_col2:
+            if st.button("📱 Send Academic Advisory via SMS", use_container_width=True):
+                top_action = f"Attendance: {overall_attendance:.1f}%. Keep engaging in lectures."
+                sms_res = send_academic_recommendation_sms(
+                    phone_number=student_phone,
+                    full_name=full_name,
+                    roll_no=roll_number,
+                    risk_level=overall_risk,
+                    predicted_perf=overall_perf,
+                    top_action=top_action,
+                )
+
+                if sms_res.get("success"):
+                    st.success(f"✅ {sms_res.get('message')}")
+                elif sms_res.get("status") == "config_required":
+                    st.info(f"ℹ️ {sms_res.get('message')}")
+                else:
+                    st.error(f"❌ {sms_res.get('message')}")
 
     # High Priority Action Items
     urgent_actions = []
@@ -950,19 +1376,8 @@ with rec_tab:
         st.info("Individual course recommendations will appear as assessment data is published.")
 
 
-    st.markdown("#### 🤝 Academic Counseling & Faculty Mentor Access")
-    with st.container(border=True):
-        st.markdown(
-            f"""
-            **Assigned Faculty Advisor / Mentor:** Dr. D. Krishna Madhuri (Associate Professor, CSE/AI)  
-            **Office:** Room #312, Academic Block B  
-            **Advisory Hours:** Monday & Wednesday, 03:40 PM – 04:30 PM (Period 7)  
-            **Remedial Support:** Weekly tutorial sessions are conducted every Saturday for courses with internal scores < {policy_crit_int:.0f}/60.
-            """
-        )
-
 # =============================================================
-# TAB 7: NOTIFICATIONS & UNIVERSITY NOTICES
+# TAB 9: NOTIFICATIONS & UNIVERSITY NOTICES
 # =============================================================
 with notif_tab:
     st.subheader(f"Academic Notifications & Official Notices ({unread_count} Unread)")

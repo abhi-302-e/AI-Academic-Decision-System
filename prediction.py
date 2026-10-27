@@ -450,6 +450,194 @@ def predict_student_comprehensive(student_id, semester=1):
     }
 
 
+# ==========================================================
+# EXPLAINABLE AI (XAI): FEATURE ATTRIBUTION & CONTRIBUTION
+# ==========================================================
+
+def explain_student_academic_prediction(student_data, policies=None):
+    """
+    Compute explainable feature contributions indicating why a student
+    was assigned a specific risk classification and performance projection.
+    """
+    policies = policies or {}
+    att_thresh = float(policies.get("attendance_threshold", 75.0))
+    crit_int = float(policies.get("critical_internal_threshold", 24.0))
+
+    att = float(student_data.get("attendance_percentage") or 0.0)
+    mid = float(student_data.get("mid_exam_marks") or 0.0)
+    quiz = float(student_data.get("quiz_marks") or 0.0)
+    assn = float(student_data.get("assignment_marks") or 0.0)
+    lab = float(student_data.get("lab_marks") or 0.0)
+    time_spent = float(student_data.get("time_spent_learning") or 0.0)
+    lms_freq = float(student_data.get("lms_login_frequency") or 0.0)
+
+    factors = []
+
+    # 1. Attendance Regularity (Benchmark: 75%)
+    if att < att_thresh:
+        att_impact = -round((att_thresh - att) * 1.6 + 10, 1)
+        att_reason = f"Attendance ({att:.1f}%) is below statutory {att_thresh:.0f}% minimum, triggering high condonation risk."
+        att_dir = "Negative"
+    else:
+        att_impact = round(min((att - att_thresh) * 1.2 + 8, 35.0), 1)
+        att_reason = f"Attendance ({att:.1f}%) meets statutory exam eligibility (≥ {att_thresh:.0f}%)."
+        att_dir = "Positive"
+    factors.append({
+        "feature": "Attendance Regularity",
+        "value": f"{att:.1f}%",
+        "impact": att_impact,
+        "direction": att_dir,
+        "benchmark": f"≥ {att_thresh:.0f}%",
+        "reason": att_reason,
+    })
+
+    # 2. Mid-Exam Examination (/30)
+    if mid < 15.0:
+        mid_impact = -round((15.0 - mid) * 2.2 + 12, 1)
+        mid_reason = f"Mid Exam score ({mid:.1f}/30) is below passing threshold (15.0), depressing CIE trajectory."
+        mid_dir = "Negative"
+    elif mid >= 24.0:
+        mid_impact = round((mid - 20.0) * 2.5 + 15, 1)
+        mid_reason = f"High Mid-Term mastery ({mid:.1f}/30) strongly propels performance toward Distinction."
+        mid_dir = "Positive"
+    else:
+        mid_impact = round((mid - 15.0) * 1.5, 1)
+        mid_reason = f"Satisfactory Mid Exam score ({mid:.1f}/30); steady passing trend."
+        mid_dir = "Positive" if mid_impact >= 0 else "Negative"
+    factors.append({
+        "feature": "Mid-Term Examination (/30)",
+        "value": f"{mid:.1f} / 30",
+        "impact": mid_impact,
+        "direction": mid_dir,
+        "benchmark": "≥ 15.0 / 30",
+        "reason": mid_reason,
+    })
+
+    # 3. Continuous Formative Tasks (Quiz + Assignment /20)
+    formative = quiz + assn
+    if formative < 10.0:
+        form_impact = -round((10.0 - formative) * 1.8 + 6, 1)
+        form_reason = f"Formative score ({formative:.1f}/20) signals incomplete homework submissions and quiz gaps."
+        form_dir = "Negative"
+    else:
+        form_impact = round(min((formative - 10.0) * 1.4 + 5, 20.0), 1)
+        form_reason = f"Strong continuous assignment and quiz discipline ({formative:.1f}/20)."
+        form_dir = "Positive"
+    factors.append({
+        "feature": "Quizzes & Assignments (/20)",
+        "value": f"{formative:.1f} / 20",
+        "impact": form_impact,
+        "direction": form_dir,
+        "benchmark": "≥ 12.0 / 20",
+        "reason": form_reason,
+    })
+
+    # 4. Lab & Viva Fluency (/10)
+    if lab < 5.0:
+        lab_impact = -round((5.0 - lab) * 2.0 + 5, 1)
+        lab_reason = f"Practical viva score ({lab:.1f}/10) requires remedial laboratory guidance."
+        lab_dir = "Negative"
+    else:
+        lab_impact = round(min(lab * 1.2, 15.0), 1)
+        lab_reason = f"Good laboratory experiment comprehension and viva demonstration ({lab:.1f}/10)."
+        lab_dir = "Positive"
+    factors.append({
+        "feature": "Practical & Viva Fluency (/10)",
+        "value": f"{lab:.1f} / 10",
+        "impact": lab_impact,
+        "direction": lab_dir,
+        "benchmark": "≥ 5.0 / 10",
+        "reason": lab_reason,
+    })
+
+    # 5. LMS Engagement & Study Hours
+    if time_spent < 10.0 or lms_freq < 15:
+        lms_impact = -8.0
+        lms_reason = f"Low digital VLE activity ({time_spent:.1f} hrs/wk, {int(lms_freq)} logins) signals disengagement."
+        lms_dir = "Negative"
+    else:
+        lms_impact = round(min(time_spent * 0.4 + lms_freq * 0.1, 15.0), 1)
+        lms_reason = f"Consistent LMS courseware engagement ({time_spent:.1f} hrs/wk, {int(lms_freq)} logins)."
+        lms_dir = "Positive"
+    factors.append({
+        "feature": "LMS & Study Engagement",
+        "value": f"{time_spent:.1f}h/wk · {int(lms_freq)} logins",
+        "impact": lms_impact,
+        "direction": lms_dir,
+        "benchmark": "≥ 12h/wk",
+        "reason": lms_reason,
+    })
+
+    # Summary synthesis
+    neg_factors = [f for f in factors if f["impact"] < 0]
+    pos_factors = [f for f in factors if f["impact"] > 0]
+
+    primary_risk = min(factors, key=lambda x: x["impact"])
+    primary_strength = max(factors, key=lambda x: x["impact"])
+
+    if neg_factors:
+        narrative = (
+            f"The primary driver elevating academic risk is {primary_risk['feature']} "
+            f"({primary_risk['value']}, contributing {primary_risk['impact']} points). "
+            f"Remediating this factor will directly improve the student's grade standing."
+        )
+    else:
+        narrative = (
+            f"Academic indicators demonstrate strong stability across all metrics. "
+            f"The strongest performance anchor is {primary_strength['feature']} "
+            f"({primary_strength['value']}, contributing +{primary_strength['impact']} points)."
+        )
+
+    return {
+        "factors": factors,
+        "primary_risk_driver": primary_risk["feature"] if primary_risk["impact"] < 0 else "None",
+        "primary_strength": primary_strength["feature"],
+        "executive_summary": narrative,
+    }
+
+
+# ==========================================================
+# WHAT-IF ACADEMIC GOAL SIMULATOR
+# ==========================================================
+
+def simulate_student_academic_outcomes(
+    base_student_data,
+    target_mid,
+    target_attendance,
+    target_quiz,
+    target_assign,
+    target_study_hours,
+    policies=None,
+):
+    """
+    Simulate academic performance and risk under hypothetical score/attendance conditions.
+    """
+    sim_data = dict(base_student_data)
+    sim_data["mid_exam_marks"] = float(target_mid)
+    sim_data["attendance_percentage"] = float(target_attendance)
+    sim_data["quiz_marks"] = float(target_quiz)
+    sim_data["assignment_marks"] = float(target_assign)
+    sim_data["time_spent_learning"] = float(target_study_hours)
+
+    mark_cols = ["assignment_marks", "quiz_marks", "mid_exam_marks", "end_sem_marks", "lab_marks"]
+    sim_data["average_marks"] = sum(float(sim_data.get(c) or 0) for c in mark_cols) / len(mark_cols)
+    sim_data["performance_score"] = (sim_data["average_marks"] * 0.7) + (sim_data["attendance_percentage"] * 0.3)
+    sim_data["total_marks"] = sum(float(sim_data.get(c) or 0) for c in mark_cols)
+
+    pred_res = predict_student(sim_data)
+    att_cutoff = float((policies or {}).get("attendance_threshold", 75.0))
+    is_eligible = float(target_attendance) >= att_cutoff
+
+    return {
+        "simulated_performance": pred_res.get("performance_prediction", "Pass"),
+        "simulated_risk": pred_res.get("risk_level", "Medium"),
+        "is_exam_eligible": is_eligible,
+        "attendance_gap": round(max(0.0, att_cutoff - float(target_attendance)), 1),
+        "target_internal_total": round(float(target_mid) + float(target_quiz) + float(target_assign) + float(sim_data.get("lab_marks") or 8.0), 1),
+        "target_attendance": float(target_attendance),
+        "target_mid": float(target_mid),
+    }
+
 
 # ==========================================================
 # SAMPLE TEST

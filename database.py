@@ -5589,10 +5589,319 @@ def upgrade_student_approval_system():
 
         connection.close()
 
+
+# =========================================================
+# STUDENT PERSONAL, DEMOGRAPHIC & PAYMENT SYSTEM UPGRADE
+# =========================================================
+
+def upgrade_student_personal_and_payment_system():
+    connection = get_connection()
+    cursor = connection.cursor()
+    try:
+        cursor.execute("PRAGMA table_info(students)")
+        existing_cols = [r[1] for r in cursor.fetchall()]
+
+        new_student_cols = {
+            "blood_group": "TEXT DEFAULT 'O+'",
+            "nationality": "TEXT DEFAULT 'Indian'",
+            "religion": "TEXT DEFAULT 'Hindu'",
+            "aadhar_no": "TEXT",
+            "caste": "TEXT DEFAULT 'General'",
+            "parent_name": "TEXT",
+            "parent_phone": "TEXT",
+            "parent_email": "TEXT",
+            "parent_qualification": "TEXT",
+            "parent_occupation": "TEXT",
+            "parent_organization": "TEXT",
+        }
+
+        for col, ctype in new_student_cols.items():
+            if col not in existing_cols:
+                cursor.execute(f"ALTER TABLE students ADD COLUMN {col} {ctype}")
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS student_semester_fees (
+            fee_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL,
+            semester INTEGER NOT NULL,
+            academic_year TEXT NOT NULL,
+            tuition_fee REAL NOT NULL,
+            exam_fee REAL NOT NULL,
+            amenities_fee REAL NOT NULL,
+            total_due REAL NOT NULL,
+            amount_paid REAL NOT NULL,
+            due_amount REAL NOT NULL,
+            payment_status TEXT NOT NULL,
+            payment_mode TEXT,
+            transaction_id TEXT,
+            payment_date TEXT,
+            receipt_no TEXT,
+            FOREIGN KEY(student_id) REFERENCES students(student_id),
+            UNIQUE(student_id, semester)
+        )
+        """)
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS marks_audit_log (
+            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL,
+            course_id INTEGER,
+            course_code TEXT,
+            faculty_name TEXT,
+            component TEXT,
+            old_value REAL,
+            new_value REAL,
+            action_type TEXT DEFAULT 'UPDATE',
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS communication_logs (
+            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recipient_type TEXT,
+            recipient_name TEXT,
+            recipient_contact TEXT,
+            channel TEXT,
+            sender_email TEXT DEFAULT 'forestnation08@gmail.com',
+            subject TEXT,
+            message TEXT,
+            status TEXT,
+            error_message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS system_announcements (
+            announcement_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            priority TEXT DEFAULT 'Normal',
+            target_role TEXT DEFAULT 'All',
+            created_by TEXT DEFAULT 'Administration',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        connection.commit()
+    except Exception as error:
+        connection.rollback()
+        print(f"Personal and payment upgrade error: {error}")
+    finally:
+        connection.close()
+
+
+def get_student_semester_fees(student_id):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT * FROM student_semester_fees
+        WHERE student_id = ?
+        ORDER BY semester ASC
+        """,
+        (student_id,)
+    ).fetchall()
+    connection.close()
+    return [dict(r) for r in rows]
+
+
+def get_student_fee_statements(student_id):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT * FROM student_fee_statements
+        WHERE student_id = ?
+        ORDER BY statement_id ASC
+        """,
+        (student_id,)
+    ).fetchall()
+    connection.close()
+    return [dict(r) for r in rows]
+
+
+def get_student_fines(student_id):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT * FROM student_fines
+        WHERE student_id = ?
+        ORDER BY fine_id DESC
+        """,
+        (student_id,)
+    ).fetchall()
+    connection.close()
+    return [dict(r) for r in rows]
+
+
+def pay_student_fine(student_id, fine_id, payment_mode="UPI / Net Banking", transaction_id=None):
+    import datetime
+    txn = transaction_id or f"TXN-FINE-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+    p_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        UPDATE student_fines
+        SET status = 'Paid',
+            payment_date = ?,
+            transaction_id = ?
+        WHERE fine_id = ? AND student_id = ?
+        """,
+        (p_date, txn, fine_id, student_id)
+    )
+    connection.commit()
+    ok = cursor.rowcount > 0
+    connection.close()
+    return ok
+
+
+def get_student_refund_requests(student_id):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT * FROM student_refunds
+        WHERE student_id = ?
+        ORDER BY refund_id DESC
+        """,
+        (student_id,)
+    ).fetchall()
+    connection.close()
+    return [dict(r) for r in rows]
+
+
+def submit_refund_request(student_id, refund_type, amount, bank_name, account_number, ifsc_code, holder_name, reason):
+    import random
+    app_no = f"REF-2026-{random.randint(10000, 99999)}"
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        INSERT INTO student_refunds (
+            student_id, application_no, refund_type, amount_requested,
+            bank_name, account_number, ifsc_code, account_holder_name,
+            reason, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Under Review')
+        """,
+        (student_id, app_no, refund_type, amount, bank_name, account_number, ifsc_code, holder_name, reason)
+    )
+    connection.commit()
+    connection.close()
+    return app_no
+
+
+def update_student_contact_info(student_id, phone, email, address=None, parent_phone=None, parent_email=None):
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        UPDATE students
+        SET phone = ?,
+            email = ?,
+            address = COALESCE(?, address),
+            parent_phone = COALESCE(?, parent_phone),
+            parent_email = COALESCE(?, parent_email)
+        WHERE student_id = ?
+        """,
+        (phone, email, address, parent_phone, parent_email, student_id)
+    )
+    connection.commit()
+    success = cursor.rowcount > 0
+    connection.close()
+    return success
+
+
+def log_marks_audit(student_id, course_id, course_code, faculty_name, component, old_val, new_val, action="UPDATE"):
+    connection = get_connection()
+    connection.execute(
+        """
+        INSERT INTO marks_audit_log (
+            student_id, course_id, course_code, faculty_name,
+            component, old_value, new_value, action_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (student_id, course_id, course_code, faculty_name, component, old_val, new_val, action)
+    )
+    connection.commit()
+    connection.close()
+
+
+def get_marks_audit_logs(limit=50):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT a.*, s.roll_number, s.full_name
+        FROM marks_audit_log a
+        LEFT JOIN students s ON a.student_id = s.student_id
+        ORDER BY a.log_id DESC
+        LIMIT ?
+        """,
+        (limit,)
+    ).fetchall()
+    connection.close()
+    return [dict(r) for r in rows]
+
+
+def log_communication(recipient_type, recipient_name, recipient_contact, channel, subject, message, status="Sent", error_message=None, sender_email="forestnation08@gmail.com"):
+    connection = get_connection()
+    connection.execute(
+        """
+        INSERT INTO communication_logs (
+            recipient_type, recipient_name, recipient_contact,
+            channel, sender_email, subject, message, status, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (recipient_type, recipient_name, recipient_contact, channel, sender_email, subject, message, status, error_message)
+    )
+    connection.commit()
+    connection.close()
+
+
+def get_communication_logs(limit=50):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT * FROM communication_logs
+        ORDER BY log_id DESC
+        LIMIT ?
+        """,
+        (limit,)
+    ).fetchall()
+    connection.close()
+    return [dict(r) for r in rows]
+
+
+def get_system_announcements(target_role="All"):
+    connection = get_connection()
+    rows = connection.execute(
+        """
+        SELECT * FROM system_announcements
+        WHERE target_role = 'All' OR target_role = ?
+        ORDER BY announcement_id DESC
+        """,
+        (target_role,)
+    ).fetchall()
+    connection.close()
+    return [dict(r) for r in rows]
+
+
+def create_system_announcement(title, content, priority="Normal", target_role="All", created_by="Administration"):
+    connection = get_connection()
+    connection.execute(
+        """
+        INSERT INTO system_announcements (title, content, priority, target_role, created_by)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (title, content, priority, target_role, created_by)
+    )
+    connection.commit()
+    connection.close()
+
+
 if __name__ == "__main__":
     initialize_database()
     upgrade_student_registration_system()
     upgrade_student_approval_system()
+    upgrade_student_personal_and_payment_system()
 
 # =========================================================
 # STUDENT NOTIFICATIONS

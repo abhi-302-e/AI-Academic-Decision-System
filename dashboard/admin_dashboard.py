@@ -51,9 +51,22 @@ from database import (
     admin_update_student_profile,
     admin_update_faculty_profile,
     get_latest_model_training_run,
-    get_all_model_training_runs,
     get_academic_policies,
     update_academic_policies,
+    get_marks_audit_logs,
+    log_communication,
+    get_communication_logs,
+    get_system_announcements,
+    create_system_announcement,
+)
+from email_service import (
+    send_email,
+    get_configured_admin_email,
+    is_email_service_active,
+)
+from sms_service import (
+    send_academic_update_sms,
+    is_sms_service_configured,
 )
 from models.train_registered_course_models import (
     prepare_training_data,
@@ -145,6 +158,8 @@ menu = st.sidebar.selectbox(
         "Faculty Registration Approvals",
         "Faculty Teaching Requests",
         "Train ML Models",
+        "Communications & Outbound Services",
+        "Audit Trail & Announcements",
         "View Students",
         "View Faculty Details",
         "Manage Academic Records",
@@ -1906,6 +1921,143 @@ elif menu == "Delete Student":
             del st.session_state.delete_student
 
             st.success("Student Deleted Successfully")
+
+
+# ==========================================================
+# COMMUNICATIONS & OUTBOUND SERVICES
+# ==========================================================
+
+elif menu == "Communications & Outbound Services":
+
+    st.subheader("📡 Real-World Outbound Communication Center")
+    admin_email = get_configured_admin_email()
+
+    st.markdown(
+        f"""
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #2563eb; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem;">
+            <b>Permanent Institutional Sender:</b> <code>{admin_email}</code><br>
+            All academic predictions, AI recommendations, and attendance shortage alerts are dispatched from this address directly to individual student and parent contacts.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col_mail_stat, col_sms_stat = st.columns(2)
+    with col_mail_stat:
+        mail_active = is_email_service_active()
+        st.metric("Gmail SMTP Service", "● LIVE CONNECTED" if mail_active else "○ CREDENTIALS NEEDED")
+        if not mail_active:
+            st.info("To dispatch real-world emails from `forestnation08@gmail.com`, generate a 16-character App Password at `myaccount.google.com/apppasswords` and set `EMAIL_APP_PASSWORD`.")
+        else:
+            st.success("Real-world Gmail SMTP is armed and ready.")
+
+    with col_sms_stat:
+        sms_active = is_sms_service_configured()
+        st.metric("Twilio Cellular SMS Gateway", "● ARMED" if sms_active else "○ SIMULATION / PENDING")
+        if not sms_active:
+            st.caption("Provide `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` in environment for live cellular delivery.")
+
+    st.markdown("#### ✉️ Send Test Live Email from forestnation08@gmail.com")
+    with st.form("test_email_form"):
+        test_to = st.text_input("Recipient Email Address", "student@example.com")
+        test_subj = st.text_input("Subject", "IFHE Academic Decision System - Live Gateway Test")
+        test_body = st.text_area("Message Body", "This is an official test communication from forestnation08@gmail.com verifying the live email service.")
+        send_test = st.form_submit_button("🚀 Dispatch Test Email", type="primary")
+
+        if send_test:
+            res = send_email(test_to, test_subj, test_body)
+            if res.get("success"):
+                st.success(f"✅ {res.get('message')}")
+            else:
+                st.warning(f"ℹ️ {res.get('message')}")
+
+    st.markdown("#### 📜 Outbound Delivery Audit Log")
+    comm_logs = get_communication_logs(limit=50)
+    if comm_logs:
+        st.dataframe(pd.DataFrame(comm_logs), use_container_width=True, hide_index=True)
+    else:
+        st.info("No outbound communications logged yet.")
+
+
+# ==========================================================
+# AUDIT TRAIL & ANNOUNCEMENTS
+# ==========================================================
+
+elif menu == "Audit Trail & Announcements":
+
+    st.subheader("📢 Institutional Announcements & Gradebook Audit Trail")
+
+    st.markdown("#### 📢 Broadcast New Institutional Announcement")
+    with st.form("create_announcement_form"):
+        a_title = st.text_input("Announcement Headline / Title")
+        a_content = st.text_area("Announcement Notice Content")
+        a_col1, a_col2 = st.columns(2)
+        with a_col1:
+            a_prio = st.selectbox("Priority Level", ["Normal", "High", "Urgent"])
+        with a_col2:
+            a_role = st.selectbox("Target Audience", ["All", "Student", "Faculty"])
+
+        post_ann = st.form_submit_button("Post Official Notice", type="primary")
+        if post_ann:
+            if not a_title or not a_content:
+                st.error("Please enter both title and content.")
+            else:
+                create_system_announcement(a_title, a_content, a_prio, a_role, created_by=admin.get("full_name", "Administration"))
+                st.success("✅ Announcement broadcasted across user portals!")
+                st.rerun()
+
+    st.markdown("#### 📋 Active University Announcements")
+    announcements = get_system_announcements("All")
+    if announcements:
+        for a in announcements:
+            with st.container(border=True):
+                st.markdown(f"**[{a['priority']} Priority] {a['title']}** (Target: {a['target_role']})")
+                st.caption(f"Posted by {a['created_by']} on {a['created_at']}")
+                st.write(a["content"])
+    else:
+        st.info("No active announcements.")
+
+    st.markdown("#### 📜 Faculty Assessment Marks Modification Audit Log")
+    st.caption("Tamper-proof record tracking all student mark adjustments, faculty evaluators, and timestamps.")
+    m_logs = get_marks_audit_logs(limit=50)
+    if m_logs:
+        st.dataframe(pd.DataFrame(m_logs), use_container_width=True, hide_index=True)
+    else:
+        st.info("No marks modifications logged yet.")
+
+
+# ==========================================================
+# SETTINGS
+# ==========================================================
+
+elif menu == "Settings":
+
+    st.subheader("⚙️ Institutional Academic Policies & ML Thresholds")
+    policies = get_academic_policies()
+
+    with st.form("academic_policies_form"):
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            att_thresh = st.number_input("Mandatory Attendance Cutoff (%)", min_value=50.0, max_value=95.0, value=float(policies.get("attendance_threshold", 75.0)), step=1.0)
+            crit_int = st.number_input("Satisfactory Internal CIE Cutoff (/60)", min_value=15.0, max_value=50.0, value=float(policies.get("critical_internal_threshold", 24.0)), step=1.0)
+            mid_thresh = st.number_input("Mid-Exam Passing Cutoff (/30)", min_value=5.0, max_value=25.0, value=float(policies.get("mid_exam_threshold", 15.0)), step=1.0)
+        with col_p2:
+            dist_cgpa = st.number_input("Distinction Minimum CGPA (/10)", min_value=6.0, max_value=9.5, value=float(policies.get("distinction_cgpa", 8.0)), step=0.1)
+            active_algo = st.selectbox("Active Classifier Algorithm", ["Random Forest", "Gradient Boosting", "SVM", "Logistic Regression"], index=0)
+            pred_enabled = st.checkbox("Enable Real-Time AI Predictions across Portals", value=bool(policies.get("predictions_enabled", 1)))
+
+        save_p = st.form_submit_button("Save Institutional Policies", type="primary")
+        if save_p:
+            update_academic_policies({
+                "attendance_threshold": att_thresh,
+                "critical_internal_threshold": crit_int,
+                "mid_exam_threshold": mid_thresh,
+                "distinction_cgpa": dist_cgpa,
+                "active_ml_algorithm": active_algo,
+                "predictions_enabled": 1 if pred_enabled else 0,
+            })
+            st.success("✅ Academic policies updated and synced across all dashboards!")
+            st.rerun()
 
 
 # ==========================================================

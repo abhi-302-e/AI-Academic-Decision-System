@@ -8,6 +8,7 @@ from database import (
     initialize_database,
     upgrade_student_registration_system,
     upgrade_student_approval_system,
+    upgrade_student_personal_and_payment_system,
     ensure_default_admin,
     get_connection,
 )
@@ -34,6 +35,7 @@ def initialize_app_database(schema_revision):
     initialize_database()
     upgrade_student_registration_system()
     upgrade_student_approval_system()
+    upgrade_student_personal_and_payment_system()
     ensure_default_admin()
 
 
