@@ -4,9 +4,9 @@
 **Real-World Application:** Self-Learning ERP Intelligence  .
 **Theme:** AI Academic Governance  
 **Faculty Guides:** Mrs. Madhusmita Majhi & Dr. D. Krishna Madhuri  
-**Institution:** The ICFAI Foundation for Higher Education (IFHE), Faculty of Science & Technology (FST), Hyderabad  
+**Institution:** The ICFAI Foundation for Higher Education (IFHE), Faculty of Science & Technology (FST), Hyderabad  .
 
----
+------
 
 ## 📌 Executive Summary & Problem Statement
 
