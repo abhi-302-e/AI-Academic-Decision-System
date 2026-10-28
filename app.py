@@ -1,6 +1,9 @@
-"""Application entry point and role-aware page navigation."""
-
+import sys
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -12,8 +15,6 @@ from database import (
     ensure_default_admin,
     get_connection,
 )
-
-ROOT_DIR = Path(__file__).resolve().parent
 
 st.set_page_config(
     page_title="Academic Decision System",

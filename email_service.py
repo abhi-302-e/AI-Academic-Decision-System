@@ -19,13 +19,18 @@ ADMIN_EMAIL_ADDRESS = "forestnation08@gmail.com"
 def get_secret(key, default=""):
     """Read Streamlit Cloud secrets first, then environment variables."""
     try:
-        value = st.secrets.get(key, "")
-        if value:
-            return str(value).strip()
+        if hasattr(st, "secrets") and st.secrets is not None:
+            if key in st.secrets:
+                val = st.secrets[key]
+                if val is not None:
+                    return str(val).strip()
     except Exception:
         pass
 
-    return os.getenv(key, default).strip()
+    env_val = os.getenv(key, default)
+    if env_val is None:
+        return ""
+    return str(env_val).strip()
 
 
 EMAIL_ADDRESS = (

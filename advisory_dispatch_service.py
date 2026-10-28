@@ -11,11 +11,16 @@ Handles:
 """
 
 import os
+import sys
 import sqlite3
 import threading
 import time
 from datetime import datetime, date
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from database import (
     get_connection,
@@ -25,21 +30,25 @@ from database import (
     get_academic_policies,
     log_communication,
 )
+import email_service
 from email_service import (
     send_student_recommendations_email,
     send_session_attendance_email,
     get_configured_admin_email,
     is_email_service_active,
 )
+import sms_service
 from sms_service import (
     send_academic_recommendation_sms,
     send_session_attendance_sms,
     is_sms_service_configured,
 )
+import recommendation_engine
 from recommendation_engine import (
     generate_course_level_recommendations,
     recommendations_for_prediction,
 )
+import prediction
 from prediction import (
     predict_student_comprehensive,
     are_course_models_trained,
@@ -529,5 +538,5 @@ def start_scheduler_service():
             print("[Scheduler] Automated Daily 6:00 PM Advisory Dispatcher background service started.")
 
 
-# Auto-start on module import
-start_scheduler_service()
+# Scheduler can be started on demand by admin dashboard or explicitly
+# start_scheduler_service()
