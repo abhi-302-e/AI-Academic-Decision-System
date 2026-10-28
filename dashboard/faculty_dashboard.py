@@ -9,6 +9,7 @@ Faculty Guides: Mrs. Madhusmita Majhi & Dr. D. Krishna Madhuri
 
 import io
 import sys
+import time
 from datetime import date
 from pathlib import Path
 import pandas as pd
@@ -406,7 +407,18 @@ with tab_att:
                         sel_att_slot["timetable_id"], faculty_id, date_text, records
                     )
                     if session_id:
-                        st.success(f"Attendance recorded and locked for {len(records)} students. Session ID: #{session_id}")
+                        from advisory_dispatch_service import (
+                            dispatch_section_attendance_notifications,
+                            is_auto_attendance_enabled,
+                        )
+                        dispatch_msg = ""
+                        if is_auto_attendance_enabled():
+                            att_res = dispatch_section_attendance_notifications(session_id)
+                            if att_res.get("success"):
+                                dispatch_msg = f" 📧📱 Email & SMS notifications dispatched to {att_res.get('total_students')} Section {sel_att_slot['section']} students."
+                        st.toast(f"✅ Attendance recorded! {dispatch_msg}")
+                        st.success(f"Attendance recorded and locked for {len(records)} students. Session ID: #{session_id}.{dispatch_msg}")
+                        time.sleep(1.5)
                         st.rerun()
                     else:
                         st.error("Attendance submission failed or was already submitted.")
@@ -558,7 +570,7 @@ with tab_risk:
                 st.success(f"Early warning advisory successfully sent to {sent_count} students.")
 
         st.markdown("#### 🚨 Statutory Attendance Shortage Alert (< 75%) Dispatch Center")
-        st.caption(f"Send live Email and SMS notifications to students and parents using permanent admin sender: `{get_configured_admin_email()}`")
+        st.caption(f"Send live Email and SMS notifications to students and parents using admin sender: `{get_configured_admin_email()}`")
 
         shortage_students = [r for r in risk_students if float(dict(r).get("attendance_percentage") or 0) < 75.0]
         if st.button(f"🚀 Dispatch Statutory Shortage Alerts to {len(shortage_students)} Students & Parents", type="primary", use_container_width=True):

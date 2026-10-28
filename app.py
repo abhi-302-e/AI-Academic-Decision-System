@@ -67,6 +67,7 @@ elif role == "Admin":
     pages = {
         "Administration": [
             st.Page("dashboard/admin_dashboard.py", title="Admin Dashboard", icon="🛡️", default=True),
+            st.Page("dashboard/advisory_dispatch.py", title="Recommendations & Predictions Dispatch", icon="📡"),
             st.Page("dashboard/student_approvals.py", title="Student Approvals", icon="📋"),
             st.Page("dashboard/analytics.py", title="Analytics", icon="📊"),
             st.Page("dashboard/reports.py", title="Reports", icon="📄"),

@@ -2,7 +2,7 @@
 ===========================================================
 AI-Based Autonomous Academic Decision System
 Email Communication Service
-Sender (Permanent): forestnation08@gmail.com
+Institutional Sender: forestnation08@gmail.com
 ===========================================================
 """
 
@@ -61,7 +61,7 @@ def send_email(to_email, subject, body, html_body=None, recipient_name="Student"
     )
 
     message = EmailMessage()
-    message["From"] = f"IFHE Academic Administration <{from_email}>"
+    message["From"] = f"AI Academic Decision System <{from_email}>"
     message["To"] = to_email
     message["Subject"] = subject
     message.set_content(body)
@@ -176,7 +176,7 @@ def send_student_recommendations_email(
 
     plain_body = f"""Dear {full_name},
 
-This is an official academic advisory notice from the AI Academic Decision System (IFHE Faculty of Science & Technology).
+This is an official academic advisory notice from the AI Academic Decision System.
 
 Student Credentials:
 • Full Name: {full_name}
@@ -199,7 +199,7 @@ Please log in to your Student ERP Portal for your complete Gradebook, Course Tim
 
 Regards,
 Academic Administration & AI Decision Cell
-The ICFAI Foundation for Higher Education (IFHE)
+AI Academic Decision System
 Sender: {get_configured_admin_email()}
 """
 
@@ -212,9 +212,9 @@ Sender: {get_configured_admin_email()}
     <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; padding: 20px; color: #1e293b;">
         <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e2e8f0;">
             <div style="background: linear-gradient(135deg, #091e3a 0%, #1e3a8a 100%); color: #ffffff; padding: 24px; text-align: center;">
-                <h2 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 0.5px;">THE ICFAI FOUNDATION FOR HIGHER EDUCATION</h2>
-                <div style="font-size: 13px; color: #ffd166; margin-top: 4px; font-weight: 600;">Faculty of Science & Technology (FST)</div>
-                <div style="font-size: 12px; color: #cbd5e1; margin-top: 4px;">AI-Based Autonomous Academic Decision System</div>
+                <h2 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 0.5px;">AI ACADEMIC DECISION SYSTEM</h2>
+                <div style="font-size: 13px; color: #ffd166; margin-top: 4px; font-weight: 600;">Autonomous Academic Advisory Portal</div>
+                <div style="font-size: 12px; color: #cbd5e1; margin-top: 4px;">Predictive Intelligence & Decision Engine</div>
             </div>
             
             <div style="padding: 24px;">
@@ -256,7 +256,7 @@ Sender: {get_configured_admin_email()}
                 <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;">
                 <p style="font-size: 11px; color: #94a3b8; text-align: center; margin: 0;">
                     Official Institutional Communication from <b>{get_configured_admin_email()}</b>.<br>
-                    Autonomous Academic Decision System · IFHE Hyderabad
+                    Autonomous Academic Decision System
                 </p>
             </div>
         </div>
@@ -288,7 +288,7 @@ Under university academic governance:
 • Contact your Head of Department immediately.
 
 Academic Administration
-The ICFAI Foundation for Higher Education
+AI Academic Decision System
 Sender: {get_configured_admin_email()}
 """
     res = send_email(to_email, subject, body, recipient_name=full_name)
@@ -301,13 +301,13 @@ Sender: {get_configured_admin_email()}
 
 
 def send_enrollment_email(to_email, full_name, enrollment_no):
-    """Send student their newly generated permanent Enrollment Number."""
+    """Send student their newly generated Enrollment Number."""
     subject = "Student Registration Successful - Enrollment Number"
     body = f"""Dear {full_name},
 
 Your student registration has been successfully verified and completed.
 
-Your permanent Enrollment Number is:
+Your Enrollment Number is:
 {enrollment_no}
 
 This Enrollment Number will remain unchanged throughout your degree program.
@@ -316,7 +316,79 @@ You can use your Enrollment Number + Password to log in to the Student ERP Porta
 Regards,
 University Academic Administration
 AI Academic Decision System
-The ICFAI Foundation for Higher Education
 Sender: {get_configured_admin_email()}
 """
     return send_email(to_email, subject, body, recipient_name=full_name)
+
+
+def send_session_attendance_email(
+    to_email,
+    full_name,
+    roll_no,
+    course_code,
+    course_name,
+    session_date,
+    is_present,
+    attendance_pct,
+    section="",
+):
+    """
+    Send daily class attendance notification to student when faculty submits attendance.
+    """
+    status_label = "PRESENT" if is_present else "ABSENT"
+    subject = f"Class Attendance Recorded: {status_label} - {course_code} ({session_date})"
+
+    plain_body = f"""Dear {full_name},
+
+This is an automated notification from the AI Academic Decision System regarding your classroom attendance.
+
+Attendance Session Details:
+• Course: {course_code} - {course_name}
+• Section: Section {section}
+• Date: {session_date}
+• Status: {status_label}
+• Cumulative Course Attendance: {attendance_pct:.1f}%
+
+{'Keep up the consistent attendance to remain eligible for End-Semester examinations.' if is_present else 'Warning: You were marked ABSENT for this session. Statutory UGC regulations require maintaining minimum 75% attendance to sit for examinations.'}
+
+Regards,
+Academic Administration & Attendance Monitoring Cell
+AI Academic Decision System
+Sender: {get_configured_admin_email()}
+"""
+
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"></head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; padding: 20px; color: #1e293b;">
+        <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e2e8f0;">
+            <div style="background: linear-gradient(135deg, #091e3a 0%, #1e3a8a 100%); color: #ffffff; padding: 20px; text-align: center;">
+                <h2 style="margin: 0; font-size: 19px; font-weight: 700;">AI ACADEMIC DECISION SYSTEM</h2>
+                <div style="font-size: 12px; color: #ffd166; margin-top: 4px;">Classroom Attendance Notification</div>
+            </div>
+            <div style="padding: 24px;">
+                <p style="font-size: 15px; margin-top: 0;">Dear <b>{full_name}</b> (Roll No: <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">{roll_no}</code>),</p>
+                <p style="font-size: 14px; color: #475569;">
+                    Faculty has submitted and recorded the attendance for today's session:
+                </p>
+                <div style="background: {'#f0fdf4' if is_present else '#fef2f2'}; border: 1px solid {'#bbf7d0' if is_present else '#fecaca'}; border-radius: 8px; padding: 16px; margin: 16px 0; text-align: center;">
+                    <div style="font-size: 12px; text-transform: uppercase; color: {'#166534' if is_present else '#991b1b'}; font-weight: 700;">Attendance Status</div>
+                    <div style="font-size: 24px; font-weight: 800; color: {'#15803d' if is_present else '#b91c1c'}; margin-top: 4px;">{status_label}</div>
+                    <div style="font-size: 13px; color: #64748b; margin-top: 6px;"><b>Course:</b> {course_code} - {course_name} | <b>Section:</b> {section} | <b>Date:</b> {session_date}</div>
+                    <div style="font-size: 14px; font-weight: 700; color: #0f172a; margin-top: 8px;">Updated Cumulative Attendance: {attendance_pct:.1f}%</div>
+                </div>
+                <p style="font-size: 13px; color: #64748b; line-height: 1.5;">
+                    {'You have maintained continuous class attendance. Keep engaging with your coursework.' if is_present else '⚠️ As per university regulations, students falling below 75% attendance become ineligible for end-semester examinations. Please regularize your attendance immediately.'}
+                </p>
+                <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+                <p style="font-size: 11px; color: #94a3b8; text-align: center; margin: 0;">
+                    Official Institutional Communication from <b>{get_configured_admin_email()}</b>.<br>
+                    Autonomous Academic Decision System
+                </p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return send_email(to_email, subject, plain_body, html_body=html_body, recipient_name=full_name)

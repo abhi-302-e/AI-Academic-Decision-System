@@ -53,12 +53,10 @@ from prediction import (
 )
 from recommendation_engine import generate_course_level_recommendations, generate_recommendation
 from email_service import (
-    send_student_recommendations_email,
     get_configured_admin_email,
     is_email_service_active,
 )
 from sms_service import (
-    send_academic_recommendation_sms,
     is_sms_service_configured,
 )
 
@@ -222,7 +220,7 @@ with st.sidebar:
     st.caption(f"Dept: {department}")
     st.divider()
     st.markdown("#### 📧 Outbound Real Services")
-    st.caption(f"Permanent Admin: `{get_configured_admin_email()}`")
+    st.caption(f"Admin: `{get_configured_admin_email()}`")
     st.caption(f"Personal Phone: `{student_phone}`")
     st.divider()
     if st.button("🚪 Logout", key="student_sidebar_logout", use_container_width=True, type="primary"):
@@ -459,7 +457,7 @@ with overview_tab:
                 st.write(f"**Department:** {department}")
             with dcol2:
                 st.write(f"**Registered Credits:** {total_credits} Credits")
-                st.write(f"**Permanent Admin:** `{get_configured_admin_email()}`")
+                st.write(f"**Admin:** `{get_configured_admin_email()}`")
                 st.write(f"**Registration Status:** ● Verified & Active")
 
     with col_highlights:
@@ -516,7 +514,7 @@ with profile_tab:
             st.markdown("#### 👤 Student Personal Details")
             st.write(f"**Full Name:** {student.get('full_name', '—')}")
             st.write(f"**Roll Number:** `{student.get('roll_number', '—')}`")
-            st.write(f"**Permanent Enrollment No:** `{enrollment_number}`")
+            st.write(f"**Enrollment No:** `{enrollment_number}`")
             st.write(f"**Student Phone Number:** `{student.get('phone', '—')}` 🟢 *Active for SMS*")
             st.write(f"**Student Email Address:** `{student.get('email', '—')}` 🟢 *Active for Email*")
             st.write(f"**Date of Birth:** {student.get('date_of_birth') or '2005-06-14'}")
@@ -533,7 +531,7 @@ with profile_tab:
             st.write(f"**Mother's Name:** {student.get('mother_name') or 'Mrs. Guardian'}")
             st.write(f"**Parent Mobile Number:** `{student.get('parent_phone') or '+91 98480 12345'}` 🟢 *Active for Alerts*")
             st.write(f"**Parent Email Address:** `{student.get('parent_email') or 'parent@example.com'}`")
-            st.write(f"**Permanent Residential Address:** {student.get('address') or 'Plot #42, Academic City, Hyderabad, Telangana - 500075'}")
+            st.write(f"**Residential Address:** {student.get('address') or 'Plot #42, Academic City, Hyderabad, Telangana - 500075'}")
             st.write(f"**Parent Qualification:** {student.get('parent_qualification') or 'B.Tech, MBA'}")
             st.write(f"**Parent Occupation:** {student.get('parent_occupation') or 'Senior Consultant'}")
             st.write(f"**Parent Organization:** {student.get('parent_organization') or 'State Administration / Corporate'}")
@@ -549,7 +547,7 @@ with profile_tab:
             new_parent_phone = st.text_input("Parent Mobile Number", value=student.get("parent_phone", ""))
         with ecol2:
             new_email = st.text_input("Student Email Address (for Real Email Advisories)", value=student.get("email", ""))
-            new_address = st.text_area("Permanent Residential Address", value=student.get("address", ""), height=70)
+            new_address = st.text_area("Residential Address", value=student.get("address", ""), height=70)
 
         contact_submitted = st.form_submit_button("💾 Save & Verify Real Contact Information", type="primary")
         if contact_submitted:
@@ -714,7 +712,7 @@ with fees_tab:
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; font-size: 0.85rem; background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1.2rem; border: 1px solid #e2e8f0;">
                     <div><b>Student Name:</b> {full_name}</div>
                     <div><b>Roll Number:</b> {roll_number}</div>
-                    <div><b>Permanent Enrollment No:</b> {enrollment_number}</div>
+                    <div><b>Enrollment No:</b> {enrollment_number}</div>
                     <div><b>Academic Program:</b> B.Tech (Honors) · {department}</div>
                     <div><b>Semester / Batch:</b> Year 1, Semester 1 · Batch 2026–27</div>
                     <div><b>Assigned Section:</b> Section {assigned_section}</div>
@@ -1059,7 +1057,7 @@ with gradebook_tab:
 
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.9rem; background: #f8fafc; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid #e2e8f0;">
                         <div><b>Student Name:</b> {full_name}</div>
-                        <div><b>Permanent Enrollment No:</b> {enrollment_number}</div>
+                        <div><b>Enrollment No:</b> {enrollment_number}</div>
                         <div><b>Roll Number:</b> {roll_number}</div>
                         <div><b>Program:</b> Bachelor of Technology (Honors)</div>
                         <div><b>Department:</b> {department}</div>
@@ -1261,78 +1259,8 @@ with ai_engine_tab:
 # TAB 8: TARGETED RECOMMENDATIONS & REAL OUTBOUND SERVICES
 # =============================================================
 with rec_tab:
-    st.subheader("AI-Generated Recommendations & Outbound Notification Services")
-    st.caption("Personalized action plans and real-world delivery to your verified email and mobile devices.")
-
-    # Real-World Outbound Delivery Panel
-    st.markdown("### 📡 Real-World Outbound Delivery Center")
-    admin_sender = get_configured_admin_email()
-
-    with st.container(border=True):
-        st.markdown(
-            f"""
-            <div style="background: #f8fafc; border-left: 4px solid #2563eb; padding: 0.8rem 1rem; border-radius: 6px; margin-bottom: 1rem;">
-                <b>🏛️ Outbound Institutional Gateway Configuration:</b><br>
-                • <b>Permanent Admin Sender:</b> <code>{admin_sender}</code><br>
-                • <b>Student Recipient Email:</b> <code>{student_email}</code><br>
-                • <b>Student Mobile Number:</b> <code>{student_phone}</code><br>
-                • <b>Parent Mobile Number:</b> <code>{student.get('parent_phone', 'Not Set')}</code>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        btn_col1, btn_col2 = st.columns(2)
-
-        with btn_col1:
-            if st.button("📧 Send AI Recommendations to My Email", type="primary", use_container_width=True):
-                all_recs = []
-                if course_assessments:
-                    for ca in course_assessments:
-                        r_items = generate_course_level_recommendations(ca, policies=academic_policies)
-                        for itm in r_items:
-                            all_recs.append(f"{ca['course_code']}: {itm.get('text') if isinstance(itm, dict) else itm}")
-                else:
-                    all_recs = ["Maintain continuous class attendance and submit all formative homework assignments."]
-
-                email_res = send_student_recommendations_email(
-                    to_email=student_email,
-                    full_name=full_name,
-                    roll_no=roll_number,
-                    enrollment_no=enrollment_number,
-                    risk_level=overall_risk,
-                    predicted_perf=overall_perf,
-                    cgpa=cgpa_val,
-                    attendance=overall_attendance,
-                    recommendations_list=all_recs[:5],
-                    xai_summary=xai_data.get("executive_summary", ""),
-                )
-
-                if email_res.get("success"):
-                    st.success(f"✅ {email_res.get('message')}")
-                elif email_res.get("status") == "config_required":
-                    st.info(f"ℹ️ {email_res.get('message')}")
-                else:
-                    st.error(f"❌ {email_res.get('message')}")
-
-        with btn_col2:
-            if st.button("📱 Send Academic Advisory via SMS", use_container_width=True):
-                top_action = f"Attendance: {overall_attendance:.1f}%. Keep engaging in lectures."
-                sms_res = send_academic_recommendation_sms(
-                    phone_number=student_phone,
-                    full_name=full_name,
-                    roll_no=roll_number,
-                    risk_level=overall_risk,
-                    predicted_perf=overall_perf,
-                    top_action=top_action,
-                )
-
-                if sms_res.get("success"):
-                    st.success(f"✅ {sms_res.get('message')}")
-                elif sms_res.get("status") == "config_required":
-                    st.info(f"ℹ️ {sms_res.get('message')}")
-                else:
-                    st.error(f"❌ {sms_res.get('message')}")
+    st.subheader("AI-Generated Recommendations & Action Plans")
+    st.caption("Personalized course-level intervention roadmaps and study guidance formulated by institutional AI models.")
 
     # High Priority Action Items
     urgent_actions = []

@@ -2776,7 +2776,7 @@ def create_new_student_account(
     Create a new student account for first-time registration.
 
     This function:
-    - Generates the permanent Enrollment Number
+    - Generates the Enrollment Number
     - Creates the student profile
     - Does NOT register a semester
     - Does NOT assign courses
@@ -2809,7 +2809,7 @@ def create_new_student_account(
             return None
 
         # ------------------------------------------------------
-        # PERMANENT ENROLLMENT NUMBER
+        # ENROLLMENT NUMBER
         # ------------------------------------------------------
 
         enrollment_no = generate_enrollment_number(

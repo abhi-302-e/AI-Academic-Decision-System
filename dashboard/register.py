@@ -43,7 +43,7 @@ st.title("🎓 New Student Registration")
 
 st.info(
     "This registration is only for students who are joining the university "
-    "for the first time. Existing students should use their permanent "
+    "for the first time. Existing students should use their "
     "Enrollment Number and Password to login."
 )
 
@@ -138,7 +138,7 @@ if st.session_state.registration_step == 1:
             )
 
             address = st.text_area(
-                "Permanent Address *",
+                "Residential Address *",
                 placeholder="Enter your complete address"
             )
 
@@ -183,7 +183,7 @@ if st.session_state.registration_step == 1:
             errors.append("Please enter your mobile number.")
 
         if not address.strip():
-            errors.append("Please enter your permanent address.")
+            errors.append("Please enter your residential address.")
 
         if not email.strip():
             errors.append("Please enter your email address.")
@@ -210,7 +210,7 @@ if st.session_state.registration_step == 1:
         else:
 
             # -------------------------------------------------
-            # CREATE PERMANENT STUDENT ACCOUNT
+            # CREATE STUDENT ACCOUNT
             # -------------------------------------------------
             student_result = create_new_student_account(
                 full_name=full_name.strip(),
@@ -261,7 +261,7 @@ elif st.session_state.registration_step == 3:
 
     st.balloons()
 
-    st.subheader("Your Permanent Enrollment Number")
+    st.subheader("Your Enrollment Number")
 
     st.markdown(
         f"""
@@ -274,7 +274,7 @@ elif st.session_state.registration_step == 3:
         ">
             <h2>Enrollment Number</h2>
             <h1>{st.session_state.pending_enrollment_no}</h1>
-            <p>This Enrollment Number is permanent and will remain
+            <p>This Enrollment Number will remain
             the same throughout your degree.</p>
         </div>
         """,
@@ -351,7 +351,7 @@ st.divider()
 if st.session_state.registration_step != 3:
 
     st.caption(
-        "Already registered? Use your permanent Enrollment Number "
+        "Already registered? Use your Enrollment Number "
         "and Password to login."
     )
 

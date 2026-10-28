@@ -158,7 +158,7 @@ menu = st.sidebar.selectbox(
         "Faculty Registration Approvals",
         "Faculty Teaching Requests",
         "Train ML Models",
-        "Communications & Outbound Services",
+        "Recommendations & Predictions Dispatch (Email & SMS)",
         "Audit Trail & Announcements",
         "View Students",
         "View Faculty Details",
@@ -1923,19 +1923,14 @@ elif menu == "Delete Student":
             st.success("Student Deleted Successfully")
 
 
-# ==========================================================
-# COMMUNICATIONS & OUTBOUND SERVICES
-# ==========================================================
-
-elif menu == "Communications & Outbound Services":
-
-    st.subheader("📡 Real-World Outbound Communication Center")
+elif menu in ["Recommendations & Predictions Dispatch (Email & SMS)", "Communications & Outbound Services"]:
+    st.switch_page("dashboard/advisory_dispatch.py")
     admin_email = get_configured_admin_email()
 
     st.markdown(
         f"""
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #2563eb; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem;">
-            <b>Permanent Institutional Sender:</b> <code>{admin_email}</code><br>
+            <b>Institutional Sender:</b> <code>{admin_email}</code><br>
             All academic predictions, AI recommendations, and attendance shortage alerts are dispatched from this address directly to individual student and parent contacts.
         </div>
         """,
