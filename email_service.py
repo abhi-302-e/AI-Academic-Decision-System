@@ -11,29 +11,41 @@ import smtplib
 from email.message import EmailMessage
 from pathlib import Path
 from database import log_communication
+import streamlit as st
 
-# Auto-load credentials from .env file (highest priority – loaded before any os.getenv call)
-try:
-    from dotenv import load_dotenv
-    _ENV_FILE = Path(__file__).resolve().parent / ".env"
-    load_dotenv(dotenv_path=_ENV_FILE, override=False)  # override=False: shell $env: vars win
-except ImportError:
-    pass  # python-dotenv not installed – fall back to manual $env: vars
 
 ADMIN_EMAIL_ADDRESS = "forestnation08@gmail.com"
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", ADMIN_EMAIL_ADDRESS)
-EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
+
+def get_secret(key, default=""):
+    """Read Streamlit Cloud secrets first, then environment variables."""
+    try:
+        value = st.secrets.get(key, "")
+        if value:
+            return str(value).strip()
+    except Exception:
+        pass
+
+    return os.getenv(key, default).strip()
+
+
+EMAIL_ADDRESS = (
+    get_secret("SMTP_EMAIL")
+    or get_secret("EMAIL_ADDRESS")
+    or ADMIN_EMAIL_ADDRESS
+)
+
+EMAIL_APP_PASSWORD = (
+    get_secret("SMTP_APP_PASSWORD")
+    or get_secret("EMAIL_APP_PASSWORD")
+)
 
 
 def get_configured_admin_email():
-    """Return the permanent institutional admin sender email address."""
-    return os.getenv("EMAIL_ADDRESS", ADMIN_EMAIL_ADDRESS)
+    return EMAIL_ADDRESS
 
 
 def is_email_service_active():
-    """Check if Google App Password credentials are available for real-world delivery."""
-    app_pwd = os.getenv("EMAIL_APP_PASSWORD")
-    return bool(app_pwd and len(app_pwd.strip()) >= 8)
+    return bool(EMAIL_APP_PASSWORD)
 
 
 def send_email(to_email, subject, body, html_body=None, recipient_name="Student"):
@@ -43,8 +55,10 @@ def send_email(to_email, subject, body, html_body=None, recipient_name="Student"
     Otherwise, logs the dispatch to database and provides actionable instructions.
     """
     from_email = get_configured_admin_email()
-    app_password = os.getenv("EMAIL_APP_PASSWORD") or EMAIL_APP_PASSWORD
-
+    app_password = (
+    get_secret("SMTP_APP_PASSWORD")
+    or get_secret("EMAIL_APP_PASSWORD")
+)
     message = EmailMessage()
     message["From"] = f"IFHE Academic Administration <{from_email}>"
     message["To"] = to_email
