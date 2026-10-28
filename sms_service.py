@@ -19,6 +19,26 @@ try:
 except ImportError:
     pass
 
+try:
+    import streamlit as st
+except ImportError:
+    st = None
+
+def get_sms_secret(key, default=""):
+    """Fetch secret from Streamlit secrets or OS environment."""
+    try:
+        if st is not None and hasattr(st, "secrets") and st.secrets is not None:
+            if key in st.secrets:
+                val = st.secrets[key]
+                if val is not None:
+                    return str(val).strip()
+    except Exception:
+        pass
+    env_val = os.getenv(key, default)
+    if env_val is None:
+        return ""
+    return str(env_val).strip()
+
 
 def normalize_phone_number(phone_number):
     """Clean and standardize phone numbers into E.164 international format."""
@@ -45,68 +65,88 @@ def normalize_phone_number(phone_number):
 
 def is_sms_service_configured():
     """Check if Twilio credentials are fully supplied."""
-    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-    from_number = os.getenv("TWILIO_FROM_NUMBER") or os.getenv("TWILIO_MESSAGING_SERVICE_SID")
+    account_sid = get_sms_secret("TWILIO_ACCOUNT_SID")
+    auth_token = get_sms_secret("TWILIO_AUTH_TOKEN")
+    from_number = get_sms_secret("TWILIO_FROM_NUMBER") or get_sms_secret("TWILIO_MESSAGING_SERVICE_SID")
     return bool(account_sid and auth_token and from_number)
 
 
-def send_academic_update_sms(phone_number, message_body, recipient_name="Student"):
+def is_whatsapp_enabled():
+    """Check if Twilio WhatsApp channel is enabled."""
+    return bool(get_sms_secret("TWILIO_WHATSAPP_NUMBER") or get_sms_secret("TWILIO_ENABLE_WHATSAPP"))
+
+
+def send_academic_update_sms(phone_number, message_body, recipient_name="Student", send_whatsapp=False):
     """
-    Send an SMS message to a mobile number.
+    Send an SMS or WhatsApp message to a mobile number.
     If Twilio is configured, sends via Twilio API.
-    Otherwise, logs to database with Simulated status and actionable setup tips.
+    Otherwise, logs to database with simulated queueing.
     """
     try:
         norm_phone = normalize_phone_number(phone_number)
     except Exception as e:
         return {"success": False, "status": "invalid_number", "message": f"Invalid phone format: {e}"}
 
-    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-    messaging_service_sid = os.getenv("TWILIO_MESSAGING_SERVICE_SID")
-    from_number = os.getenv("TWILIO_FROM_NUMBER")
+    account_sid = get_sms_secret("TWILIO_ACCOUNT_SID")
+    auth_token = get_sms_secret("TWILIO_AUTH_TOKEN")
+    messaging_service_sid = get_sms_secret("TWILIO_MESSAGING_SERVICE_SID")
+    from_number = get_sms_secret("TWILIO_FROM_NUMBER")
+    whatsapp_number = get_sms_secret("TWILIO_WHATSAPP_NUMBER")
 
-    if not (account_sid and auth_token and (messaging_service_sid or from_number)):
-        # Record simulated dispatch in database
+    channel_name = "WhatsApp" if send_whatsapp else "SMS"
+
+    if not (account_sid and auth_token and (messaging_service_sid or from_number or whatsapp_number)):
         log_communication(
             recipient_type="Student",
             recipient_name=recipient_name,
             recipient_contact=norm_phone,
-            channel="SMS",
+            channel=channel_name,
             sender_email="forestnation08@gmail.com",
-            subject="Academic SMS Alert",
+            subject=f"Academic {channel_name} Alert",
             message=message_body,
             status="Config Required",
-            error_message="Twilio credentials not configured in environment.",
+            error_message="Twilio credentials not configured in environment or Streamlit secrets.",
         )
         return {
             "success": False,
             "status": "config_required",
             "phone": norm_phone,
+            "channel": channel_name,
             "message": (
-                f"SMS queued for real phone {norm_phone}. "
-                "To deliver live cellular SMS, configure TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in environment."
+                f"{channel_name} queued for mobile {norm_phone}. "
+                "To deliver live cellular alerts, add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in Streamlit secrets or .env."
             ),
         }
 
     try:
         from twilio.rest import Client
         client = Client(account_sid, auth_token)
-        message_options = {"to": norm_phone, "body": message_body}
-        if messaging_service_sid:
-            message_options["messaging_service_sid"] = messaging_service_sid
-        else:
-            message_options["from_"] = from_number
 
-        message = client.messages.create(**message_options)
+        if send_whatsapp and whatsapp_number:
+            from_wa = whatsapp_number if whatsapp_number.startswith("whatsapp:") else f"whatsapp:{whatsapp_number}"
+            to_wa = f"whatsapp:{norm_phone}"
+            message = client.messages.create(
+                from_=from_wa,
+                to=to_wa,
+                body=message_body,
+            )
+        else:
+            message_options = {"to": norm_phone, "body": message_body}
+            if messaging_service_sid:
+                message_options["messaging_service_sid"] = messaging_service_sid
+            elif from_number:
+                message_options["from_"] = from_number
+            else:
+                raise ValueError("No Twilio sender phone number or Messaging Service SID provided.")
+            message = client.messages.create(**message_options)
+
         log_communication(
             recipient_type="Student",
             recipient_name=recipient_name,
             recipient_contact=norm_phone,
-            channel="SMS",
+            channel=channel_name,
             sender_email="forestnation08@gmail.com",
-            subject="Academic SMS Alert",
+            subject=f"Academic {channel_name} Alert",
             message=message_body,
             status="Delivered",
             error_message=None,
@@ -116,7 +156,8 @@ def send_academic_update_sms(phone_number, message_body, recipient_name="Student
             "status": "delivered",
             "sid": message.sid,
             "phone": norm_phone,
-            "message": f"Live SMS successfully dispatched to {norm_phone}!",
+            "channel": channel_name,
+            "message": f"Live {channel_name} successfully delivered to {norm_phone}!",
         }
 
     except Exception as error:
@@ -125,14 +166,20 @@ def send_academic_update_sms(phone_number, message_body, recipient_name="Student
             recipient_type="Student",
             recipient_name=recipient_name,
             recipient_contact=norm_phone,
-            channel="SMS",
+            channel=channel_name,
             sender_email="forestnation08@gmail.com",
-            subject="Academic SMS Alert",
+            subject=f"Academic {channel_name} Alert",
             message=message_body,
             status="Failed",
             error_message=err_msg,
         )
-        return {"success": False, "status": "failed", "phone": norm_phone, "message": f"Twilio SMS delivery failed: {err_msg}"}
+        return {
+            "success": False,
+            "status": "failed",
+            "phone": norm_phone,
+            "channel": channel_name,
+            "message": f"Twilio {channel_name} delivery failed: {err_msg}",
+        }
 
 
 def send_academic_recommendation_sms(phone_number, full_name, roll_no, risk_level, predicted_perf, top_action=""):
