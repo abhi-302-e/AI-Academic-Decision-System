@@ -12,6 +12,7 @@ from database import (
     upgrade_student_registration_system,
     upgrade_student_approval_system,
     upgrade_student_personal_and_payment_system,
+    upgrade_student_emails_to_gmail,
     ensure_default_admin,
     get_connection,
 )
@@ -37,6 +38,7 @@ def initialize_app_database(schema_revision):
     upgrade_student_registration_system()
     upgrade_student_approval_system()
     upgrade_student_personal_and_payment_system()
+    upgrade_student_emails_to_gmail()
     ensure_default_admin()
 
 

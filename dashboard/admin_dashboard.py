@@ -51,6 +51,7 @@ from database import (
     admin_update_student_profile,
     admin_update_faculty_profile,
     get_latest_model_training_run,
+    get_all_model_training_runs,
     get_academic_policies,
     update_academic_policies,
     get_marks_audit_logs,

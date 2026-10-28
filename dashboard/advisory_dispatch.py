@@ -287,25 +287,31 @@ with tab_att:
 
     st.markdown("#### 📅 Recorded Attendance Sessions")
     conn = get_connection()
-    sessions = conn.execute(
-        """
-        SELECT s.session_id, s.session_date, s.timetable_id, s.created_at,
-               t.section, t.day, t.slot,
-               c.course_name, COALESCE(c.catalog_code, c.course_code) AS course_code,
-               f.full_name AS faculty_name,
-               COUNT(r.record_id) AS total_marked,
-               SUM(r.is_present) AS present_count
-        FROM attendance_sessions s
-        JOIN timetable t ON t.timetable_id = s.timetable_id
-        JOIN courses c ON c.course_id = t.course_id
-        LEFT JOIN faculty f ON f.faculty_id = s.faculty_id
-        LEFT JOIN attendance_session_records r ON r.session_id = s.session_id
-        GROUP BY s.session_id
-        ORDER BY s.session_date DESC, s.session_id DESC
-        LIMIT 30
-        """
-    ).fetchall()
-    conn.close()
+    sessions = []
+    try:
+        sessions = conn.execute(
+            """
+            SELECT s.session_id, s.session_date, s.timetable_id, s.created_at,
+                   t.section, t.day, t.slot,
+                   c.course_name, COALESCE(c.catalog_code, c.course_code) AS course_code,
+                   f.full_name AS faculty_name,
+                   COUNT(r.student_id) AS total_marked,
+                   SUM(r.is_present) AS present_count
+            FROM attendance_sessions s
+            JOIN timetable t ON t.timetable_id = s.timetable_id
+            JOIN courses c ON c.course_id = t.course_id
+            LEFT JOIN faculty f ON f.faculty_id = s.faculty_id
+            LEFT JOIN attendance_session_records r ON r.session_id = s.session_id
+            GROUP BY s.session_id
+            ORDER BY s.session_date DESC, s.session_id DESC
+            LIMIT 30
+            """
+        ).fetchall()
+    except Exception as e:
+        print(f"Notice: attendance_sessions query fallback: {e}")
+        sessions = []
+    finally:
+        conn.close()
 
     if not sessions:
         st.info("No classroom attendance sessions have been submitted by faculty yet.")

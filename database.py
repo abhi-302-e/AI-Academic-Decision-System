@@ -6386,9 +6386,71 @@ def update_academic_policies(policies_dict):
             """,
             (key, str(val))
         )
-    connection.commit()
-    connection.close()
-    return True
+
+def upgrade_student_emails_to_gmail():
+    """
+    Format all student emails to their full name + registration year @gmail.com.
+    Example:
+      John registered for 2026 -> john26@gmail.com
+      Charly registered for 2027 -> charly27@gmail.com
+    Handles duplicate collisions deterministically with suffix numbers.
+    """
+    import re
+    connection = get_connection()
+    cursor = connection.cursor()
+    try:
+        cursor.execute("SELECT student_id, full_name, roll_number, admission_year, email FROM students")
+        rows = cursor.fetchall()
+        if not rows:
+            return 0
+
+        # We first gather existing emails or determine the new ones
+        seen = set()
+        updated_count = 0
+        for row in rows:
+            sid = row["student_id"]
+            name = row["full_name"] or ""
+            roll = row["roll_number"] or ""
+            adm_year = row["admission_year"] or ""
+            current_email = (row["email"] or "").strip().lower()
+
+            clean_name = re.sub(r'[^a-zA-Z0-9]', '', str(name)).lower()
+            if not clean_name:
+                clean_name = f"student{sid}"
+
+            yr = ""
+            if roll:
+                m = re.match(r'^(\d{2})', str(roll).strip())
+                if m:
+                    yr = m.group(1)
+            if not yr and adm_year:
+                yr = str(adm_year).strip()[-2:]
+            if not yr:
+                yr = "26"
+
+            candidate = f"{clean_name}{yr}@gmail.com"
+            counter = 2
+            while candidate in seen:
+                candidate = f"{clean_name}{yr}{counter}@gmail.com"
+                counter += 1
+
+            seen.add(candidate)
+
+            if current_email != candidate:
+                cursor.execute(
+                    "UPDATE students SET email = ? WHERE student_id = ?",
+                    (candidate, sid)
+                )
+                updated_count += 1
+
+        connection.commit()
+        return updated_count
+    except Exception as e:
+        print(f"Error updating student emails: {e}")
+        return 0
+    finally:
+        connection.close()
+
 
 
 # ===========================================================
