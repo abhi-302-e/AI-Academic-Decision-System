@@ -183,50 +183,63 @@ def send_academic_update_sms(phone_number, message_body, recipient_name="Student
 
 
 def send_academic_recommendation_sms(phone_number, full_name, roll_no, risk_level, predicted_perf, top_action=""):
-    """Dispatch concise SMS advisory to student and parent mobile numbers."""
+    """Dispatch concise SMS and WhatsApp advisory to student and parent mobile numbers."""
     action_text = f" Advisory: {top_action[:60]}." if top_action else ""
     sms_body = (
         f"[AI Academic System] Dear {full_name} ({roll_no}): "
         f"Your AI Forecast is {predicted_perf} ({risk_level} Risk).{action_text} "
         "Log in to the Student ERP portal for your complete intervention plan."
     )
-    return send_academic_update_sms(phone_number, sms_body, recipient_name=full_name)
+    # Attempt SMS
+    res = send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=False)
+    # If WhatsApp is enabled, also transmit via WhatsApp
+    if is_whatsapp_enabled():
+        send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=True)
+    return res
 
 
 def send_attendance_shortage_sms(phone_number, full_name, attendance_pct, parent_phone=None):
-    """Send statutory attendance shortage warning via SMS."""
+    """Send statutory attendance shortage warning via SMS and WhatsApp."""
     sms_body = (
         f"[AI Academic System] Dear {full_name}: Your attendance is {attendance_pct:.1f}% "
         "(below UGC 75% minimum). You are at risk of exam condonation. "
         "Attend upcoming classes and remedial tutorials immediately."
     )
-    res = send_academic_update_sms(phone_number, sms_body, recipient_name=full_name)
+    res = send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=False)
+    if is_whatsapp_enabled():
+        send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=True)
 
     if parent_phone:
         p_body = (
             f"[AI Academic System] Attendance for your ward {full_name} is {attendance_pct:.1f}% "
             "(below UGC 75% limit). Remedial tutorial attendance is mandatory."
         )
-        send_academic_update_sms(parent_phone, p_body, recipient_name=f"Parent of {full_name}")
+        send_academic_update_sms(parent_phone, p_body, recipient_name=f"Parent of {full_name}", send_whatsapp=False)
+        if is_whatsapp_enabled():
+            send_academic_update_sms(parent_phone, p_body, recipient_name=f"Parent of {full_name}", send_whatsapp=True)
 
     return res
 
 
 def send_session_attendance_sms(phone_number, full_name, roll_no, course_code, session_date, is_present, attendance_pct, parent_phone=None):
-    """Dispatch SMS notification when faculty submits attendance for a session."""
+    """Dispatch SMS and WhatsApp notification when faculty submits attendance for a session."""
     status_str = "PRESENT" if is_present else "ABSENT"
     sms_body = (
         f"[AI Academic System] Dear {full_name} ({roll_no}): Attendance for {course_code} on {session_date} "
         f"is recorded: {status_str}. Current attendance: {attendance_pct:.1f}%."
     )
-    res = send_academic_update_sms(phone_number, sms_body, recipient_name=full_name)
+    res = send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=False)
+    if is_whatsapp_enabled():
+        send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=True)
 
     if not is_present and parent_phone:
         p_body = (
             f"[AI Academic System] Alert for Parent of {full_name}: Your ward was marked ABSENT for "
             f"{course_code} on {session_date}. Current attendance: {attendance_pct:.1f}%."
         )
-        send_academic_update_sms(parent_phone, p_body, recipient_name=f"Parent of {full_name}")
+        send_academic_update_sms(parent_phone, p_body, recipient_name=f"Parent of {full_name}", send_whatsapp=False)
+        if is_whatsapp_enabled():
+            send_academic_update_sms(parent_phone, p_body, recipient_name=f"Parent of {full_name}", send_whatsapp=True)
 
     return res
 
