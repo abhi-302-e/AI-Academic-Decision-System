@@ -3190,7 +3190,6 @@ def get_all_students():
 # ==========================================================
 
 def update_student(
-
     student_id,
     full_name,
     gender,
@@ -3198,13 +3197,12 @@ def update_student(
     semester,
     email,
     phone,
-    cgpa,
-    attendance_percentage,
-    lms_login_frequency,
-    time_spent_learning,
-    communication_skills,
-    discipline_score
-
+    cgpa=None,
+    attendance_percentage=None,
+    lms_login_frequency=None,
+    time_spent_learning=None,
+    communication_skills=None,
+    discipline_score=None
 ):
     """
     Update student information.
@@ -3215,28 +3213,22 @@ def update_student(
     cursor = connection.cursor()
 
     cursor.execute("""
-
     UPDATE students
-
     SET
-
-        full_name=?,
-        gender=?,
-        department=?,
-        semester=?,
-        email=?,
-        phone=?,
-        cgpa=?,
-        attendance_percentage=?,
-        lms_login_frequency=?,
-        time_spent_learning=?,
-        communication_skills=?,
-        discipline_score=?
-
-    WHERE student_id=?
-
+        full_name = ?,
+        gender = ?,
+        department = ?,
+        semester = ?,
+        email = ?,
+        phone = ?,
+        cgpa = COALESCE(?, cgpa),
+        attendance_percentage = COALESCE(?, attendance_percentage),
+        lms_login_frequency = COALESCE(?, lms_login_frequency),
+        time_spent_learning = COALESCE(?, time_spent_learning),
+        communication_skills = COALESCE(?, communication_skills),
+        discipline_score = COALESCE(?, discipline_score)
+    WHERE student_id = ?
     """, (
-
         full_name,
         gender,
         department,
@@ -3250,11 +3242,9 @@ def update_student(
         communication_skills,
         discipline_score,
         student_id
-
     ))
 
     connection.commit()
-
     connection.close()
 
 
