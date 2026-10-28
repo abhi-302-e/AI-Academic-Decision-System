@@ -50,15 +50,16 @@ def is_email_service_active():
 
 def send_email(to_email, subject, body, html_body=None, recipient_name="Student"):
     """
-    Send an email from forestnation08@gmail.com.
-    If EMAIL_APP_PASSWORD is set, sends a live email via Gmail SMTP.
-    Otherwise, logs the dispatch to database and provides actionable instructions.
+    Send an email from the configured Gmail account using Gmail SMTP.
+    Requires SMTP_APP_PASSWORD or EMAIL_APP_PASSWORD in Streamlit Secrets.
     """
     from_email = get_configured_admin_email()
+
     app_password = (
-    get_secret("SMTP_APP_PASSWORD")
-    or get_secret("EMAIL_APP_PASSWORD")
-)
+        get_secret("SMTP_APP_PASSWORD")
+        or get_secret("EMAIL_APP_PASSWORD")
+    )
+
     message = EmailMessage()
     message["From"] = f"IFHE Academic Administration <{from_email}>"
     message["To"] = to_email
@@ -69,7 +70,11 @@ def send_email(to_email, subject, body, html_body=None, recipient_name="Student"
         message.add_alternative(html_body, subtype="html")
 
     if not app_password:
-        # Log simulated dispatch
+        error_msg = (
+            "Gmail SMTP credentials are missing. "
+            "Check SMTP_APP_PASSWORD in Streamlit Cloud Secrets."
+        )
+
         log_communication(
             recipient_type="Student",
             recipient_name=recipient_name,
@@ -79,17 +84,15 @@ def send_email(to_email, subject, body, html_body=None, recipient_name="Student"
             subject=subject,
             message=body[:500],
             status="Config Required",
-            error_message="EMAIL_APP_PASSWORD not set. To send live real-world emails from forestnation08@gmail.com, generate a 16-character App Password at myaccount.google.com/apppasswords and set EMAIL_APP_PASSWORD.",
+            error_message=error_msg,
         )
+
         return {
             "success": False,
             "status": "config_required",
             "sender": from_email,
             "recipient": to_email,
-            "message": (
-                f"Email queued for {to_email} from permanent sender {from_email}. "
-                "To deliver live to the recipient inbox, please enter your Gmail App Password for forestnation08@gmail.com."
-            ),
+            "message": f"Email not sent: {error_msg}",
         }
 
     try:
@@ -105,19 +108,21 @@ def send_email(to_email, subject, body, html_body=None, recipient_name="Student"
             sender_email=from_email,
             subject=subject,
             message=body[:500],
-            status="Delivered",
+            status="Sent",
             error_message=None,
         )
+
         return {
             "success": True,
-            "status": "delivered",
+            "status": "sent",
             "sender": from_email,
             "recipient": to_email,
-            "message": f"Real-world email successfully delivered to {to_email} from {from_email}!",
+            "message": f"Email successfully submitted to Gmail for {to_email}.",
         }
 
     except Exception as error:
         err_msg = str(error)
+
         log_communication(
             recipient_type="Student",
             recipient_name=recipient_name,
@@ -129,6 +134,7 @@ def send_email(to_email, subject, body, html_body=None, recipient_name="Student"
             status="Failed",
             error_message=err_msg,
         )
+
         return {
             "success": False,
             "status": "failed",
