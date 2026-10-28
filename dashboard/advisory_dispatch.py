@@ -129,13 +129,17 @@ with tab_manual:
             section_opts = get_default_section_names()
             target_section = st.selectbox("Choose Section", section_opts)
         elif scope_mode == "Individual Student":
-            students_list = get_all_students()
+            students_df = get_all_students()
+            students_list = students_df.to_dict("records") if hasattr(students_df, "to_dict") else list(students_df)
             stu_choices = {
-                f"{s['roll_number']} - {s['full_name']} (Section {s.get('section', '—')})": s["student_id"]
+                f"{s.get('roll_number', '')} - {s.get('full_name', '')} (Section {s.get('section', '—')})": s.get("student_id")
                 for s in students_list
             }
-            sel_label = st.selectbox("Select Student", list(stu_choices.keys()))
-            target_student_id = stu_choices[sel_label]
+            if stu_choices:
+                sel_label = st.selectbox("Select Student", list(stu_choices.keys()))
+                target_student_id = stu_choices[sel_label]
+            else:
+                st.warning("No students available for selection.")
 
     with col_channels:
         st.markdown("**Delivery Channels**")
