@@ -257,87 +257,212 @@ with tab_assess:
                     st.rerun()
 
             # -------------------------------------------------------------
-            # BULK EXCEL UPLOAD & ROSTER DOWNLOAD
+            # BULK EXCEL / CSV MARKS UPLOAD & ROSTER SYNC
             # -------------------------------------------------------------
             st.markdown("---")
-            st.markdown("##### 📊 Bulk Excel Marks Entry & Roster Sync")
-            st.caption("Download the section grading template, enter scores offline in Excel, and upload for instant automated validation.")
+            st.markdown("### 📤 Upload Marks Sheet for Section " + str(selected_slot['section']))
+            st.caption(
+                f"Upload a marks spreadsheet (.xlsx or .csv) for **{selected_slot['course_code']} - {selected_slot['course_name']} (Section {selected_slot['section']})**. "
+                "The system automatically maps each student by Roll Number or Student ID, validates scores, updates the database, updates overall student marks, and notifies each student."
+            )
 
-            excel_col1, excel_col2 = st.columns(2)
+            excel_col1, excel_col2 = st.columns([1, 1], gap="medium")
 
             with excel_col1:
-                st.markdown("###### 📥 Step 1: Download Roster Template")
+                st.markdown("#### 📥 1. Download Section Marks Sheet")
+                st.write(f"Pre-filled with all **{len(roster)}** registered students in Section **{selected_slot['section']}**:")
                 template_rows = []
                 for s in roster:
                     template_rows.append({
                         "student_id": s["student_id"],
                         "roll_number": s["roll_number"],
                         "student_name": s["full_name"],
-                        "mid_exam_30": float(s.get("mid_exam_marks") or 18.0),
-                        "assignment_10": float(s.get("assignment_marks") or 7.5),
-                        "quiz_10": float(s.get("quiz_marks") or 8.0),
-                        "viva_10": float(s.get("viva_marks") or 7.0),
-                        "external_40": float(s.get("external_marks") or 28.0),
+                        "mid_exam_30": float(s.get("mid_exam_marks") or 0.0),
+                        "assignment_10": float(s.get("assignment_marks") or 0.0),
+                        "quiz_10": float(s.get("quiz_marks") or 0.0),
+                        "viva_10": float(s.get("viva_marks") or 0.0),
+                        "external_40": float(s.get("external_marks") or 0.0),
                     })
                 template_df = pd.DataFrame(template_rows)
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                    template_df.to_excel(writer, index=False, sheet_name="Roster_Marks")
+                    template_df.to_excel(writer, index=False, sheet_name="Section_Marks")
                 excel_data = buffer.getvalue()
 
                 st.download_button(
-                    label=f"📥 Download Excel Template · Section {selected_slot['section']} ({len(roster)} Students)",
+                    label=f"📥 Download Section {selected_slot['section']} Excel Template ({len(roster)} Students)",
                     data=excel_data,
-                    file_name=f"{selected_slot['course_code']}_Sec{selected_slot['section']}_Marks_Template.xlsx",
+                    file_name=f"{selected_slot['course_code']}_Section_{selected_slot['section']}_Marks_Sheet.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
 
-            with excel_col2:
-                st.markdown("###### 📤 Step 2: Upload Completed Spreadsheet")
-                uploaded_file = st.file_uploader("Upload Completed .xlsx File", type=["xlsx"], key="bulk_marks_uploader")
-                if uploaded_file is not None:
-                    try:
-                        upload_df = pd.read_excel(uploaded_file)
-                        st.write(f"Loaded **{len(upload_df)}** student score records from spreadsheet.")
-                        if st.button("🚀 Validate & Save Bulk Marks to Database", type="primary", use_container_width=True):
-                            saved_count = 0
-                            for _, row in upload_df.iterrows():
-                                s_id = int(row["student_id"])
-                                m_mid = min(max(float(row.get("mid_exam_30", 0.0)), 0.0), 30.0)
-                                m_assn = min(max(float(row.get("assignment_10", 0.0)), 0.0), 10.0)
-                                m_quiz = min(max(float(row.get("quiz_10", 0.0)), 0.0), 10.0)
-                                m_viva = min(max(float(row.get("viva_10", 0.0)), 0.0), 10.0)
-                                m_ext = min(max(float(row.get("external_40", 0.0)), 0.0), 40.0)
+                # Also provide CSV download option
+                csv_buffer = template_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label=f"📄 Download Section {selected_slot['section']} CSV Template",
+                    data=csv_buffer,
+                    file_name=f"{selected_slot['course_code']}_Section_{selected_slot['section']}_Marks_Sheet.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
 
-                                ok, _ = save_course_assessment(
-                                    selected_slot["timetable_id"],
-                                    faculty_id,
-                                    s_id,
-                                    {
-                                        "assignment_marks": m_assn,
-                                        "quiz_marks": m_quiz,
-                                        "mid_exam_marks": m_mid,
-                                        "viva_marks": m_viva,
-                                        "external_marks": m_ext,
-                                    },
+            with excel_col2:
+                st.markdown("#### 📤 2. Upload Completed Marks Sheet")
+                uploaded_file = st.file_uploader(
+                    f"Choose .xlsx or .csv Marks Sheet for Section {selected_slot['section']}",
+                    type=["xlsx", "xls", "csv"],
+                    key="faculty_bulk_marks_uploader"
+                )
+
+            if uploaded_file is not None:
+                try:
+                    if uploaded_file.name.endswith(".csv"):
+                        upload_df = pd.read_csv(uploaded_file)
+                    else:
+                        upload_df = pd.read_excel(uploaded_file)
+
+                    # Normalize column headers (strip and lowercase)
+                    raw_cols = upload_df.columns.tolist()
+                    norm_map = {col: str(col).strip().lower().replace(" ", "_") for col in raw_cols}
+                    upload_df = upload_df.rename(columns=norm_map)
+
+                    # Build roster lookup maps for section
+                    roster_by_id = {int(s["student_id"]): s for s in roster}
+                    roster_by_roll = {str(s["roll_number"]).strip().upper(): s for s in roster}
+
+                    st.markdown("##### 🔍 File Preview & Automatic Column Mapping")
+                    st.write(f"Detected **{len(upload_df)}** rows in uploaded marks sheet.")
+
+                    # Helper to find column by fuzzy candidates
+                    def find_col(df, candidates):
+                        for c in df.columns:
+                            c_clean = str(c).lower().replace(" ", "_").replace("/", "_").replace("-", "_")
+                            for cand in candidates:
+                                if cand in c_clean:
+                                    return c
+                        return None
+
+                    col_roll = find_col(upload_df, ["roll_number", "roll_no", "rollno", "enrollment", "reg_no", "regno"])
+                    col_id = find_col(upload_df, ["student_id", "studentid", "stu_id"])
+                    col_mid = find_col(upload_df, ["mid_exam", "mid_30", "mid1", "mid", "internal_mid"])
+                    col_assn = find_col(upload_df, ["assignment", "assn", "assgn"])
+                    col_quiz = find_col(upload_df, ["quiz", "test", "quiz_10"])
+                    col_viva = find_col(upload_df, ["viva", "oral", "viva_10", "viva_voce"])
+                    col_ext = find_col(upload_df, ["external", "end_sem", "see", "external_40", "univ"])
+
+                    # Display detected mappings in a neat alert
+                    mapped_info = []
+                    if col_roll: mapped_info.append(f"Roll No: `{col_roll}`")
+                    if col_id: mapped_info.append(f"Student ID: `{col_id}`")
+                    if col_mid: mapped_info.append(f"Mid Exam (/30): `{col_mid}`")
+                    if col_assn: mapped_info.append(f"Assignment (/10): `{col_assn}`")
+                    if col_quiz: mapped_info.append(f"Quiz (/10): `{col_quiz}`")
+                    if col_viva: mapped_info.append(f"Viva (/10): `{col_viva}`")
+                    if col_ext: mapped_info.append(f"External (/40): `{col_ext}`")
+
+                    st.info("Mapped Columns: " + " | ".join(mapped_info))
+
+                    with st.expander("Preview Uploaded Sheet Data (First 10 rows)", expanded=False):
+                        st.dataframe(upload_df.head(10), use_container_width=True)
+
+                    if st.button("🚀 Confirm & Automatically Apply Marks to Section " + str(selected_slot['section']), type="primary", use_container_width=True):
+                        saved_count = 0
+                        skipped_count = 0
+                        error_msgs = []
+
+                        progress_bar = st.progress(0.0)
+                        total_rows = len(upload_df)
+
+                        for idx, row in upload_df.iterrows():
+                            # Match student in this section's roster
+                            student_match = None
+                            if col_id and pd.notna(row.get(col_id)):
+                                try:
+                                    s_id_val = int(row[col_id])
+                                    student_match = roster_by_id.get(s_id_val)
+                                except Exception:
+                                    pass
+
+                            if not student_match and col_roll and pd.notna(row.get(col_roll)):
+                                r_val = str(row[col_roll]).strip().upper()
+                                student_match = roster_by_roll.get(r_val)
+
+                            if not student_match:
+                                skipped_count += 1
+                                continue
+
+                            s_id = student_match["student_id"]
+                            s_name = student_match["full_name"]
+
+                            # Extract scores safely with default to 0.0 or existing
+                            def parse_score(col, max_val, fallback):
+                                if col and pd.notna(row.get(col)):
+                                    try:
+                                        val = float(row[col])
+                                        return min(max(val, 0.0), max_val)
+                                    except Exception:
+                                        pass
+                                return fallback
+
+                            m_mid = parse_score(col_mid, 30.0, float(student_match.get("mid_exam_marks") or 0.0))
+                            m_assn = parse_score(col_assn, 10.0, float(student_match.get("assignment_marks") or 0.0))
+                            m_quiz = parse_score(col_quiz, 10.0, float(student_match.get("quiz_marks") or 0.0))
+                            m_viva = parse_score(col_viva, 10.0, float(student_match.get("viva_marks") or 0.0))
+                            m_ext = parse_score(col_ext, 40.0, float(student_match.get("external_marks") or 0.0))
+
+                            ok, err = save_course_assessment(
+                                selected_slot["timetable_id"],
+                                faculty_id,
+                                s_id,
+                                {
+                                    "assignment_marks": m_assn,
+                                    "quiz_marks": m_quiz,
+                                    "mid_exam_marks": m_mid,
+                                    "viva_marks": m_viva,
+                                    "external_marks": m_ext,
+                                },
+                            )
+                            if ok:
+                                log_marks_audit(
+                                    student_id=s_id,
+                                    course_id=selected_slot.get("course_id"),
+                                    course_code=selected_slot.get("course_code"),
+                                    faculty_name=faculty_name,
+                                    component="Marks Sheet Upload",
+                                    old_val=float(student_match.get("mid_exam_marks") or 0),
+                                    new_val=m_mid,
+                                    action="FILE_UPLOAD",
                                 )
-                                if ok:
-                                    log_marks_audit(
-                                        student_id=s_id,
-                                        course_id=selected_slot.get("course_id"),
-                                        course_code=selected_slot.get("course_code"),
-                                        faculty_name=faculty_name,
-                                        component="Bulk Excel Import",
-                                        old_val=0.0,
-                                        new_val=m_mid,
-                                        action="BULK_IMPORT",
-                                    )
-                                    saved_count += 1
-                            st.success(f"✅ Successfully updated assessments for {saved_count} students from Excel file!")
-                            st.rerun()
-                    except Exception as err:
-                        st.error(f"Error parsing Excel spreadsheet: {err}")
+                                internal_tot = m_mid + m_assn + m_quiz + m_viva
+                                update_msg = (
+                                    f"New marks uploaded for {selected_slot['course_code']} ({selected_slot['course_name']}): "
+                                    f"Internal {internal_tot:.1f}/60, External {m_ext:.1f}/40 (Total {internal_tot + m_ext:.1f}/100)."
+                                )
+                                create_student_notification(s_id, "Marks Sheet Uploaded", update_msg)
+                                saved_count += 1
+                            else:
+                                error_msgs.append(f"{student_match['roll_number']}: {err}")
+
+                            progress_bar.progress((idx + 1) / total_rows)
+
+                        progress_bar.empty()
+
+                        if saved_count > 0:
+                            st.success(
+                                f"🎉 **Success!** Successfully uploaded and updated marks for **{saved_count} students** in Section **{selected_slot['section']}**! "
+                                "Student totals, CIE/SEE scores, and portals have been updated automatically."
+                            )
+                        if skipped_count > 0:
+                            st.warning(f"ℹ️ {skipped_count} row(s) were skipped because the Roll Number / Student ID does not belong to Section {selected_slot['section']}.")
+                        if error_msgs:
+                            with st.expander("View Warnings / Errors"):
+                                for em in error_msgs:
+                                    st.write(f"• {em}")
+                        st.rerun()
+
+                except Exception as err:
+                    st.error(f"Error parsing marks sheet: {err}")
 
             with st.expander("📜 View Institutional Marks Audit Trail", expanded=False):
                 audit_logs = get_marks_audit_logs(limit=25)
