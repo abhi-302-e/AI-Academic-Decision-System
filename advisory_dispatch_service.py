@@ -512,7 +512,7 @@ def check_and_run_daily_6pm_dispatch():
             res = dispatch_student_recommendations_and_predictions(
                 section=None,
                 send_email_flag=True,
-                send_sms_flag=True,
+                send_whatsapp_flag=True,
                 is_scheduled_daily=True,
             )
             print(f"[Scheduler] Completed: {res.get('message')}")

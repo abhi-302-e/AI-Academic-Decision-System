@@ -187,7 +187,7 @@ with tab_manual:
                     section=target_section,
                     student_id=target_student_id,
                     send_email_flag=send_email_choice,
-                    send_sms_flag=send_sms_choice,
+                    send_whatsapp_flag=send_whatsapp_choice,
                     progress_callback=update_progress,
                     is_scheduled_daily=False,
                 )
@@ -257,7 +257,7 @@ with tab_daily:
             res = dispatch_student_recommendations_and_predictions(
                 section=None,
                 send_email_flag=True,
-                send_sms_flag=True,
+                send_whatsapp_flag=True,
                 is_scheduled_daily=True,
             )
         if res.get("success"):
