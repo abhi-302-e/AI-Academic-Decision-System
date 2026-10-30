@@ -8,3 +8,7 @@ bcrypt
 openpyxl
 matplotlib
 twilio
+google-genai
+networkx
+pyvis
+vaderSentiment
