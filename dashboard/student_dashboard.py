@@ -349,12 +349,14 @@ overall_risk = comprehensive_pred.get("overall_risk", "Medium")
 # -------------------------------------------------------------
 # TOP QUICK KPI METRICS BAR
 # -------------------------------------------------------------
-kpi_cols = st.columns(6)
+kpi_cols = st.columns(5)
 with kpi_cols[0]:
     st.metric(
-        "CGPA / SGPA",
-        f"{cgpa_val:.2f} / 10.0",
-        delta="Good Standing" if cgpa_val >= 7.0 else ("At-Risk" if cgpa_val < 5.0 else "Satisfactory"),
+        "Continuous Internal (CIE)",
+        f"{avg_internal:.1f} / 60" if avg_internal is not None else "Pending",
+        delta="Passing (≥24/60)" if (avg_internal or 0) >= 24.0 else "Remedial Attention",
+        delta_color="normal" if (avg_internal or 0) >= 24.0 else "inverse",
+        help="Aggregated Continuous Internal Evaluation: Mid (30) + Assignment (10) + Quiz (10) + Viva (10)",
     )
 with kpi_cols[1]:
     st.metric(
@@ -364,24 +366,20 @@ with kpi_cols[1]:
         delta_color="normal" if overall_attendance >= policy_att_thresh else "inverse",
     )
 with kpi_cols[2]:
+    cie_standing = "Good Standing" if (avg_internal or 0) >= 30 and overall_attendance >= policy_att_thresh else ("Remedial Watch" if (avg_internal or 0) >= 24 else "Critical Intervention")
     st.metric(
-        "Internal (CIE)",
-        f"{avg_internal:.1f} / 60" if avg_internal is not None else "Pending",
-        help="Continuous Internal Evaluation: Mid (30) + Assignment (10) + Quiz (10) + Viva (10)",
+        "CIE Standing",
+        cie_standing,
+        delta="In-Semester Status",
     )
 with kpi_cols[3]:
     st.metric(
-        "External Exam",
-        f"{avg_external:.1f} / 40" if avg_external is not None else "Pending",
-        help="End-Semester University Assessment out of 40 marks",
+        "Evaluation Model",
+        "Pure Continuous (CIE)",
+        delta="Grades & CGPA Removed",
+        help="Evaluates students exclusively on continuous in-semester coursework for early proactive advising.",
     )
 with kpi_cols[4]:
-    st.metric(
-        "Total Assessment",
-        f"{avg_total:.1f} / 100" if avg_total is not None else "Pending",
-        delta="Combined Marks",
-    )
-with kpi_cols[5]:
     if not predictions_enabled:
         st.metric(
             "AI Risk Radar",
@@ -416,7 +414,7 @@ with kpi_cols[5]:
     "👤 Personal & Parent Details",
     "💳 Fee Payment & Ledger",
     "📚 Academic Curriculum",
-    "📊 CIE & External Gradebook (60/40)",
+    "📊 Continuous Internal Evaluation (CIE /60)",
     "📅 Timetable & Attendance",
     "🧠 AI Decision Engine & XAI",
     "🎯 Targeted Recommendations & Alerts",
@@ -986,15 +984,17 @@ with courses_tab:
 # TAB 5: CIE & EXTERNAL GRADEBOOK (60/40) & GRADE CARD
 # =============================================================
 with gradebook_tab:
-    st.subheader("Continuous Internal Evaluation (CIE) & End-Semester Gradebook")
+    st.subheader("Continuous Internal Evaluation (CIE /60) Dossier")
     st.markdown(
         """
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; font-size: 0.88rem;">
-            <b>Institutional Evaluation Architecture:</b>  
-            Each course is evaluated on a <b>100-mark scheme</b> split into:  
-            • <b>60 Internal Marks (CIE):</b> <b>30</b> for Mid-Term Exam + <b>10</b> for Assignments + <b>10</b> for Formative Quizzes + <b>10</b> for Viva Voce / Practical Evaluation.  
-            • <b>40 External Marks (SEE):</b> End-Semester Summative University Examination.  
-            <i>Note: Marks and session attendance can only be submitted by the course faculty assigned to your section.</i>
+            <b>Continuous Internal Evaluation (CIE) Framework:</b>  
+            Each course is evaluated on a continuous <b>60-mark in-semester scale</b>:  
+            • <b>30 Marks:</b> Mid-Term Examination  
+            • <b>10 Marks:</b> Formative Assignments  
+            • <b>10 Marks:</b> Continuous Quizzes  
+            • <b>10 Marks:</b> Viva Voce / Laboratory Evaluation  
+            <i>External summative marks and final letter grades are excluded to focus strictly on mid-semester early warning and academic intervention.</i>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1010,20 +1010,8 @@ with gradebook_tab:
             quiz = ca.get("quiz_marks")
             viva = ca.get("viva_marks")
             internal = ca.get("internal_total")
-            ext = ca.get("external_marks")
-            total = ca.get("overall_total")
 
-            # Grade letter determination
-            if total is not None:
-                if total >= 90: grade = "O (Outstanding)"
-                elif total >= 80: grade = "A+ (Excellent)"
-                elif total >= 70: grade = "A (Very Good)"
-                elif total >= 60: grade = "B+ (Good)"
-                elif total >= 50: grade = "B (Above Average)"
-                elif total >= 40: grade = "C (Pass)"
-                else: grade = "F (Fail)"
-            else:
-                grade = "Incomplete"
+            cie_status = "Pass (≥24)" if (internal or 0) >= 24 else "Remedial Needed (<24)"
 
             gradebook_rows.append({
                 "Course Code": ca["course_code"],
@@ -1033,10 +1021,8 @@ with gradebook_tab:
                 "Assn /10": f"{assn:.1f}" if assn is not None else "—",
                 "Quiz /10": f"{quiz:.1f}" if quiz is not None else "—",
                 "Viva /10": f"{viva:.1f}" if viva is not None else "—",
-                "Internal /60": f"{internal:.1f}" if internal is not None else "—",
-                "External /40": f"{ext:.1f}" if ext is not None else "—",
-                "Total /100": f"{total:.1f}" if total is not None else "—",
-                "Grade": grade,
+                "Internal CIE /60": f"{internal:.1f}" if internal is not None else "—",
+                "CIE Status": cie_status,
                 "Faculty Evaluator": ca.get("faculty_name", "Assigned Faculty"),
             })
 
@@ -1072,10 +1058,12 @@ with gradebook_tab:
                                 <th style="padding: 8px; border: 1px solid #091e3a; text-align: left;">Code</th>
                                 <th style="padding: 8px; border: 1px solid #091e3a; text-align: left;">Course Title</th>
                                 <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Credits</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Mid /30</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Assn /10</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Quiz /10</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Viva /10</th>
                                 <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">CIE /60</th>
-                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">SEE /40</th>
-                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Total /100</th>
-                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Grade</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Status</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1084,10 +1072,12 @@ with gradebook_tab:
                                 <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-family: monospace;">{r["Course Code"]}</td>
                                 <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">{r["Course Title"]}</td>
                                 <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Credits"]}</td>
-                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Internal /60"]}</td>
-                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["External /40"]}</td>
-                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">{r["Total /100"]}</td>
-                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">{r["Grade"].split()[0]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Mid /30"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Assn /10"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Quiz /10"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Viva /10"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700;">{r["Internal CIE /60"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; color: {'#166534' if 'Pass' in r['CIE Status'] else '#dc2626'};">{r["CIE Status"]}</td>
                             </tr>
                             ''' for r in gradebook_rows])}
                         </tbody>
@@ -1095,9 +1085,9 @@ with gradebook_tab:
 
                     <div style="display: flex; justify-content: space-between; align-items: center; border-top: 2px solid #091e3a; padding-top: 1rem; margin-top: 1rem;">
                         <div>
-                            <div style="font-size: 1.1rem; font-weight: 800;">Semester Grade Point Average (SGPA): {cgpa_val:.2f} / 10.0</div>
-                            <div style="font-size: 0.9rem; color: #166534; font-weight: 700; margin-top: 0.2rem;">Final Trajectory: {overall_perf.upper()}</div>
-                            <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.2rem;">Total Earned Credits: 20.0 / 20.0 Credits</div>
+                            <div style="font-size: 1.1rem; font-weight: 800;">Continuous Internal Evaluation (CIE) Average: {avg_internal:.1f} / 60.0</div>
+                            <div style="font-size: 0.9rem; color: #166534; font-weight: 700; margin-top: 0.2rem;">Advisory Standing: {overall_perf.upper()}</div>
+                            <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.2rem;">In-Semester Proactive Evaluation Model (Grades & CGPA Removed)</div>
                         </div>
                         <div style="text-align: center; font-size: 0.8rem;">
                             <div style="border: 2px solid #091e3a; padding: 6px 12px; border-radius: 6px; font-weight: 800; letter-spacing: 1px;">AUTHENTICATED SEAL</div>

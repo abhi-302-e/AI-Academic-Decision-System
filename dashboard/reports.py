@@ -80,9 +80,7 @@ if rep_type.startswith("1."):
                 "Section": f"Section {r['section']}",
                 "Attendance %": f"{float(r['attendance_percentage'] or 0):.1f}%",
                 "Internal /60": f"{float(r['internal_marks'] or 0):.1f}",
-                "External /40": f"{float(r['external_marks'] or 0):.1f}",
-                "Total /100": f"{float(r['total_marks'] or 0):.1f}",
-                "CGPA": f"{float(r['cgpa'] or 0):.2f}",
+                "CIE Standing": "Good Standing" if float(r['internal_marks'] or 0) >= 30 and float(r['attendance_percentage'] or 0) >= 75 else ("Academic Watch" if float(r['attendance_percentage'] or 0) >= 65 else "Critical Risk"),
             }
             for _, r in filtered_df.iterrows()
         ]),
@@ -117,8 +115,7 @@ elif rep_type.startswith("2."):
                 "Section": f"Section {r['section']}",
                 "Attendance %": f"{float(r['attendance_percentage'] or 0):.1f}%",
                 "Internal /60": f"{float(r['internal_marks'] or 0):.1f}",
-                "Total /100": f"{float(r['total_marks'] or 0):.1f}",
-                "CGPA": f"{float(r['cgpa'] or 0):.2f}",
+                "Status": "Critical Shortage" if float(r['attendance_percentage'] or 0) < 65 else ("Attendance Risk" if float(r['attendance_percentage'] or 0) < 75 else "Low Internal (<24)"),
                 "Intervention Type": "Remedial Tutorials & Attendance Counseling" if r["attendance_percentage"] < 75 else "Academic Mentorship",
             }
             for _, r in at_risk.iterrows()
@@ -143,8 +140,6 @@ elif rep_type.startswith("3."):
         Total_Students=("student_id", "count"),
         Avg_Attendance=("attendance_percentage", "mean"),
         Avg_Internal=("internal_marks", "mean"),
-        Avg_External=("external_marks", "mean"),
-        Avg_CGPA=("cgpa", "mean"),
         Shortage_Students=("attendance_percentage", lambda s: (s < 75.0).sum()),
     ).reset_index()
 
@@ -155,8 +150,7 @@ elif rep_type.startswith("3."):
                 "Capacity / Strength": f"{r['Total_Students']} / 50",
                 "Mean Attendance": f"{r['Avg_Attendance']:.1f}%",
                 "Mean CIE /60": f"{r['Avg_Internal']:.1f}",
-                "Mean External /40": f"{r['Avg_External']:.1f}",
-                "Mean CGPA": f"{r['Avg_CGPA']:.2f}",
+                "CIE Status": "Normal (≥30)" if r['Avg_Internal'] >= 30 else "Remedial Attention",
                 "Exam Shortages (<75%)": r["Shortage_Students"],
             }
             for _, r in sec_summary.iterrows()
@@ -209,8 +203,7 @@ elif rep_type.startswith("4."):
                     "Quiz /10": f"{r['quiz_marks']:.1f}" if r["quiz_marks"] is not None else "—",
                     "Viva /10": f"{r['viva_marks']:.1f}" if r["viva_marks"] is not None else "—",
                     "CIE /60": f"{r['internal_total']:.1f}" if r["internal_total"] is not None else "—",
-                    "SEE /40": f"{r['external_marks']:.1f}" if r["external_marks"] is not None else "—",
-                    "Total /100": f"{r['overall_total']:.1f}" if r["overall_total"] is not None else "—",
+                    "CIE Status": "Pass (≥24)" if (r["internal_total"] or 0) >= 24 else "Remedial (<24)",
                 }
                 for r in audit_data
             ]),

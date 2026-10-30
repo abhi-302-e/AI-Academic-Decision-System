@@ -191,11 +191,11 @@ Student Credentials:
 AI Predictive Intelligence Forecast:
 • Projected Academic Standing: {predicted_perf}
 • Academic Risk Radar: {risk_level} Risk
-• Cumulative Grade Point Average (CGPA): {cgpa:.2f} / 10.0
+• Continuous Internal Evaluation (CIE): {float(cgpa or 0):.1f} / 60.0
 • Current Course Attendance: {attendance:.1f}%
 
 Model Explainability (XAI) Insight:
-{xai_summary or 'Predictive indicators balanced across 60/40 institutional evaluation model.'}
+{xai_summary or 'Continuous assessment indicators evaluated for proactive academic advising.'}
 
 Targeted Action Recommendations:
 {recs_text}
@@ -238,8 +238,8 @@ Sender: {get_configured_admin_email()}
                         <div style="font-size: 18px; font-weight: 700; color: {'#16a34a' if risk_level=='Low' else ('#d97706' if risk_level=='Medium' else '#dc2626')}; margin-top: 4px;">{risk_level} Risk</div>
                     </div>
                     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; text-align: center;">
-                        <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600;">Current CGPA</div>
-                        <div style="font-size: 18px; font-weight: 700; color: #0f172a; margin-top: 4px;">{cgpa:.2f} / 10.0</div>
+                        <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600;">Continuous Internal (CIE)</div>
+                        <div style="font-size: 18px; font-weight: 700; color: #0f172a; margin-top: 4px;">{float(cgpa or 0):.1f} / 60.0</div>
                     </div>
                     <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; text-align: center;">
                         <div style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600;">Attendance Regularity</div>

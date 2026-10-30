@@ -51,8 +51,8 @@ k1, k2, k3, k4, k5 = st.columns(5)
 with k1:
     st.metric("Total Enrolled Students", f"{len(students_df):,}")
 with k2:
-    avg_cgpa = students_df["cgpa"].mean()
-    st.metric("Institutional Mean CGPA", f"{avg_cgpa:.2f} / 10.0")
+    cie_pass_pct = (students_df["internal_marks"] >= 24.0).mean() * 100
+    st.metric("CIE Cohort Pass Rate", f"{cie_pass_pct:.1f}%")
 with k3:
     avg_att = students_df["attendance_percentage"].mean()
     st.metric("Mean Attendance", f"{avg_att:.1f}%")
@@ -109,13 +109,11 @@ with eda_tab1:
 with eda_tab2:
     st.subheader("Departmental & Sectional Performance Analysis")
 
-    st.markdown("##### Average Marks & Attendance by Department")
+    st.markdown("##### Average CIE Marks & Attendance by Department")
     dept_stats = students_df.groupby("department").agg(
         Students=("student_id", "count"),
         Avg_Attendance=("attendance_percentage", "mean"),
         Avg_CIE=("internal_marks", "mean"),
-        Avg_External=("external_marks", "mean"),
-        Avg_CGPA=("cgpa", "mean"),
     ).reset_index()
 
     st.dataframe(
@@ -125,8 +123,7 @@ with eda_tab2:
                 "Total Students": r["Students"],
                 "Mean Attendance": f"{r['Avg_Attendance']:.1f}%",
                 "Mean CIE /60": f"{r['Avg_CIE']:.1f}",
-                "Mean External /40": f"{r['Avg_External']:.1f}",
-                "Mean CGPA": f"{r['Avg_CGPA']:.2f}",
+                "CIE Standing": "Normal (≥30)" if r["Avg_CIE"] >= 30 else "Remedial Attention",
             }
             for _, r in dept_stats.iterrows()
         ]),
@@ -134,12 +131,11 @@ with eda_tab2:
         hide_index=True,
     )
 
-    st.markdown("##### Section-wise Student Enrollment & Performance (Sections A to J)")
+    st.markdown("##### Section-wise Student Enrollment & Continuous Evaluation (Sections A to J)")
     sec_stats = students_df.groupby("section").agg(
         Students=("student_id", "count"),
         Avg_Attendance=("attendance_percentage", "mean"),
         Avg_CIE=("internal_marks", "mean"),
-        Avg_External=("external_marks", "mean"),
     ).reset_index()
 
     st.dataframe(
@@ -149,7 +145,7 @@ with eda_tab2:
                 "Cohort Strength": r["Students"],
                 "Mean Attendance": f"{r['Avg_Attendance']:.1f}%",
                 "Mean CIE /60": f"{r['Avg_CIE']:.1f}",
-                "Mean External /40": f"{r['Avg_External']:.1f}",
+                "CIE Status": "Satisfactory (≥30)" if r["Avg_CIE"] >= 30 else "Remedial Attention",
             }
             for _, r in sec_stats.iterrows()
         ]),
@@ -184,9 +180,7 @@ with eda_tab3:
                AVG(ca.assignment_marks) AS avg_assn,
                AVG(ca.quiz_marks) AS avg_quiz,
                AVG(ca.viva_marks) AS avg_viva,
-               AVG(COALESCE(ca.mid_exam_marks, 0) + COALESCE(ca.assignment_marks, 0) + COALESCE(ca.quiz_marks, 0) + COALESCE(ca.viva_marks, 0)) AS avg_internal,
-               AVG(ca.external_marks) AS avg_external,
-               AVG(COALESCE(ca.mid_exam_marks, 0) + COALESCE(ca.assignment_marks, 0) + COALESCE(ca.quiz_marks, 0) + COALESCE(ca.viva_marks, 0) + COALESCE(ca.external_marks, 0)) AS avg_total
+               AVG(COALESCE(ca.mid_exam_marks, 0) + COALESCE(ca.assignment_marks, 0) + COALESCE(ca.quiz_marks, 0) + COALESCE(ca.viva_marks, 0)) AS avg_internal
         FROM course_assessments ca
         JOIN student_registered_courses src ON ca.registration_id = src.registration_id
         JOIN courses c ON src.course_id = c.course_id
@@ -211,8 +205,7 @@ with eda_tab3:
                     "Quiz /10": f"{float(r['avg_quiz'] or 0):.1f}",
                     "Viva /10": f"{float(r['avg_viva'] or 0):.1f}",
                     "CIE /60": f"{float(r['avg_internal'] or 0):.1f}",
-                    "SEE /40": f"{float(r['avg_external'] or 0):.1f}",
-                    "Total /100": f"{float(r['avg_total'] or 0):.1f}",
+                    "CIE Status": "Normal (≥30)" if float(r['avg_internal'] or 0) >= 30 else "Remedial Attention",
                 }
                 for r in course_stats
             ]),
@@ -220,8 +213,8 @@ with eda_tab3:
             hide_index=True,
         )
 
-        st.markdown("##### Subject-wise Mean Total Score Comparison (/100)")
-        st.bar_chart(c_stats_df.set_index("subject_code")["avg_total"])
+        st.markdown("##### Subject-wise Mean CIE Score Comparison (/60)")
+        st.bar_chart(c_stats_df.set_index("subject_code")["avg_internal"])
     else:
         st.info("No course assessment records found.")
 
@@ -232,21 +225,23 @@ with eda_tab4:
     st.subheader("Statistical Correlation: Attendance vs Academic Performance")
     st.caption("Grounding UCI Student Performance & OULAD learning analytics hypotheses on institutional data.")
 
-    corr_df = students_df[["attendance_percentage", "internal_marks", "external_marks", "total_marks", "cgpa"]].corr()
+    corr_df = students_df[["attendance_percentage", "internal_marks"]].rename(
+        columns={"attendance_percentage": "Attendance %", "internal_marks": "CIE Internal Marks /60"}
+    ).corr()
     st.markdown("##### Pearson Correlation Matrix")
     st.dataframe(corr_df.round(3), use_container_width=True)
 
-    att_to_marks_corr = corr_df.loc["attendance_percentage", "total_marks"]
+    att_to_marks_corr = corr_df.iloc[0, 1]
     st.info(
-        f"💡 **Key Finding:** Correlation between Attendance and Total Academic Marks is **+{att_to_marks_corr:.2f}** "
-        "(Strong Positive Correlation). Students maintaining ≥85% attendance consistently outperform in both continuous internal assessments (CIE) and external summative examinations."
+        f"💡 **Key Finding:** Correlation between Attendance and Continuous Internal Evaluation (CIE) Marks is **+{att_to_marks_corr:.2f}** "
+        "(Strong Positive Correlation). Students maintaining ≥85% attendance consistently achieve higher continuous assessment scores."
     )
 
-    st.markdown("##### Scatter Analysis: Attendance (%) vs Total Assessment Score (/100)")
+    st.markdown("##### Scatter Analysis: Attendance (%) vs CIE Internal Score (/60)")
     st.scatter_chart(
         students_df,
         x="attendance_percentage",
-        y="total_marks",
+        y="internal_marks",
         color="section",
     )
 

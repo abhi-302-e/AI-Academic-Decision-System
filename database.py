@@ -6305,7 +6305,7 @@ DEFAULT_ACADEMIC_POLICIES = {
     "assignment_threshold": 5.0,
     "quiz_threshold": 5.0,
     "viva_threshold": 5.0,
-    "distinction_cgpa": 8.0,
+    "distinction_cgpa": 48.0,
     "predictions_enabled": 1,
     "active_ml_algorithm": "Random Forest",
 }

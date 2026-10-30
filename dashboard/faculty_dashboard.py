@@ -150,9 +150,8 @@ with tab_assess:
                 assn = s.get("assignment_marks")
                 quiz = s.get("quiz_marks")
                 viva = s.get("viva_marks")
-                ext = s.get("external_marks")
                 internal = (mid or 0) + (assn or 0) + (quiz or 0) + (viva or 0) if mid is not None else None
-                overall = internal + ext if (internal is not None and ext is not None) else None
+                status = "On Track" if (internal or 0) >= 30 else ("Borderline" if (internal or 0) >= 24 else "Remedial Needed") if internal is not None else "Pending"
                 
                 roster_summary.append({
                     "Roll Number": s["roll_number"],
@@ -161,12 +160,11 @@ with tab_assess:
                     "Assn /10": f"{assn:.1f}" if assn is not None else "—",
                     "Quiz /10": f"{quiz:.1f}" if quiz is not None else "—",
                     "Viva /10": f"{viva:.1f}" if viva is not None else "—",
-                    "Internal /60": f"{internal:.1f}" if internal is not None else "—",
-                    "External /40": f"{ext:.1f}" if ext is not None else "—",
-                    "Total /100": f"{overall:.1f}" if overall is not None else "—",
+                    "Internal CIE /60": f"{internal:.1f}" if internal is not None else "—",
+                    "CIE Standing": status,
                 })
             
-            with st.expander(f"View Complete Section {selected_slot['section']} Assessment Table ({len(roster)} Students)", expanded=False):
+            with st.expander(f"View Complete Section {selected_slot['section']} CIE Assessment Table ({len(roster)} Students)", expanded=False):
                 st.dataframe(pd.DataFrame(roster_summary), use_container_width=True, hide_index=True)
 
             # Single Student Marks Entry Form
@@ -197,11 +195,6 @@ with tab_assess:
                         value=float(selected_student["assignment_marks"]) if selected_student["assignment_marks"] is not None else 7.5,
                         step=0.5,
                     )
-                    external = st.number_input(
-                        "End-Semester External Exam (/40)", min_value=0.0, max_value=40.0,
-                        value=float(selected_student["external_marks"]) if selected_student["external_marks"] is not None else 28.0,
-                        step=0.5,
-                    )
                 with fcol3:
                     quiz = st.number_input(
                         "Formative Quiz (/10)", min_value=0.0, max_value=10.0,
@@ -209,9 +202,9 @@ with tab_assess:
                         step=0.5,
                     )
                     current_int = mid_exam + assignment + quiz + viva
-                    current_tot = current_int + external
-                    st.metric("Internal Total", f"{current_int:.1f} / 60")
-                    st.metric("Course Total", f"{current_tot:.1f} / 100")
+                    st.metric("Continuous Internal Evaluation (CIE)", f"{current_int:.1f} / 60")
+                    cie_stat = "Satisfactory" if current_int >= 30 else ("Remedial Recommended" if current_int >= 24 else "Critical Intervention")
+                    st.caption(f"Status: **{cie_stat}** (Grades & external marks removed for early decision-making)")
 
                 save_assessment = st.form_submit_button("Save Assessment Record", type="primary", use_container_width=True)
 
@@ -225,7 +218,7 @@ with tab_assess:
                         "quiz_marks": quiz,
                         "mid_exam_marks": mid_exam,
                         "viva_marks": viva,
-                        "external_marks": external,
+                        "external_marks": 0.0,
                     },
                 )
                 if not success:
@@ -236,7 +229,7 @@ with tab_assess:
                         course_id=selected_slot.get("course_id"),
                         course_code=selected_slot.get("course_code"),
                         faculty_name=faculty_name,
-                        component="CIE/SEE Assessment",
+                        component="CIE Assessment",
                         old_val=float(selected_student.get("mid_exam_marks") or 0),
                         new_val=float(mid_exam),
                         action="UPDATE",
@@ -249,11 +242,11 @@ with tab_assess:
                     )
                     att_str = f", attendance {course_att:.1f}%" if course_att is not None else ""
                     update_msg = (
-                        f"{selected_slot['course_name']} marks saved: "
-                        f"Internal {internal_total:.1f}/60, External {external:.1f}/40{att_str}."
+                        f"{selected_slot['course_name']} CIE marks saved: "
+                        f"Internal {internal_total:.1f}/60{att_str}."
                     )
-                    create_student_notification(selected_student["student_id"], "Course Assessment Updated", update_msg)
-                    st.success(f"Assessment saved and audited successfully for {selected_student['full_name']}!")
+                    create_student_notification(selected_student["student_id"], "CIE Assessment Updated", update_msg)
+                    st.success(f"CIE Assessment saved and audited successfully for {selected_student['full_name']}!")
                     st.rerun()
 
             # -------------------------------------------------------------
@@ -281,7 +274,6 @@ with tab_assess:
                         "assignment_10": float(s.get("assignment_marks") or 0.0),
                         "quiz_10": float(s.get("quiz_marks") or 0.0),
                         "viva_10": float(s.get("viva_marks") or 0.0),
-                        "external_40": float(s.get("external_marks") or 0.0),
                     })
                 template_df = pd.DataFrame(template_rows)
                 buffer = io.BytesIO()
@@ -586,18 +578,17 @@ with tab_search:
                     with sc2:
                         att_v = float(s_dict.get("attendance_percentage") or 0)
                         st.metric("Attendance", f"{att_v:.1f}%")
-                        cgpa_v = float(s_dict.get("cgpa") or 0)
-                        st.metric("CGPA", f"{cgpa_v:.2f}")
-                    with sc3:
                         int_v = s_dict.get("internal_marks")
-                        ext_v = s_dict.get("external_marks")
                         st.metric("CIE Internal", f"{int_v:.1f}/60" if int_v is not None else "Pending")
-                        st.metric("External", f"{ext_v:.1f}/40" if ext_v is not None else "Pending")
+                    with sc3:
+                        stat_label = "Good Standing" if (int_v or 0) >= 30 and att_v >= 75 else ("Academic Watch" if att_v >= 65 else "Critical Risk")
+                        st.metric("CIE Standing", stat_label)
+                        st.metric("Evaluation Model", "In-Semester CIE")
 
                     # Course assessments for this student
                     stu_assess = get_student_course_assessments(s_dict["student_id"], s_dict["semester"])
                     if stu_assess:
-                        with st.expander(f"View {s_dict['full_name']}'s Course Assessment Breakdown (8 Courses)", expanded=False):
+                        with st.expander(f"View {s_dict['full_name']}'s Continuous Assessment Breakdown (8 Courses)", expanded=False):
                             st.dataframe(
                                 pd.DataFrame([
                                     {
@@ -608,8 +599,6 @@ with tab_search:
                                         "Quiz /10": a.get("quiz_marks"),
                                         "Viva /10": a.get("viva_marks"),
                                         "Internal /60": a.get("internal_total"),
-                                        "External /40": a.get("external_marks"),
-                                        "Total /100": a.get("overall_total"),
                                         "Attendance %": f"{a.get('course_attendance', 0):.1f}%",
                                     }
                                     for a in stu_assess
@@ -672,7 +661,7 @@ with tab_risk:
                 "Department": r_dict["department"],
                 "Attendance": f"{att_val:.1f}%",
                 "Internal /60": f"{int_val:.1f}",
-                "CGPA": f"{float(r_dict.get('cgpa') or 0):.2f}",
+                "CIE Status": "Below Threshold (<24/60)" if int_val < 24.0 else "Passing (≥24/60)",
                 "Risk Triggers": ", ".join(triggers),
                 "Recommended Action": "Schedule Remedial Tutorial & Parent Notice" if att_val < 70 else "Academic Counseling Session",
             })
@@ -739,9 +728,7 @@ with tab_analytics:
         """
         SELECT section, COUNT(*) as student_count,
                AVG(attendance_percentage) as avg_attendance,
-               AVG(internal_marks) as avg_internal,
-               AVG(external_marks) as avg_external,
-               AVG(cgpa) as avg_cgpa
+               AVG(internal_marks) as avg_internal
         FROM students
         GROUP BY section
         ORDER BY section ASC
@@ -760,8 +747,7 @@ with tab_analytics:
                     "Enrolled Strength": r["student_count"],
                     "Avg Attendance": f"{float(r['avg_attendance'] or 0):.1f}%",
                     "Avg CIE /60": f"{float(r['avg_internal'] or 0):.1f}",
-                    "Avg External /40": f"{float(r['avg_external'] or 0):.1f}",
-                    "Avg CGPA": f"{float(r['avg_cgpa'] or 0):.2f}",
+                    "CIE Health": "Normal (≥30)" if float(r['avg_internal'] or 0) >= 30 else "Remedial Attention",
                 }
                 for r in sec_stats
             ]),

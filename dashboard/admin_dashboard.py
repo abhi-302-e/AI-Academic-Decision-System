@@ -524,12 +524,12 @@ elif menu == "Train ML Models":
             st.divider()
             st.markdown("##### 🌟 Academic Honors & Distinction Criteria")
             p_cgpa = st.slider(
-                "First Class with Distinction Minimum CGPA",
-                min_value=7.0,
-                max_value=9.5,
-                value=float(policies.get("distinction_cgpa", 8.0)),
-                step=0.1,
-                help="Students at or above this threshold receive honors recommendations and advanced project invitations.",
+                "First Class with Distinction Minimum Continuous Internal Evaluation (CIE /60)",
+                min_value=40.0,
+                max_value=58.0,
+                value=float(policies.get("distinction_cgpa", 48.0)) if float(policies.get("distinction_cgpa", 8.0)) > 10 else 48.0,
+                step=0.5,
+                help="Students at or above this CIE score threshold receive honors recommendations and advanced project invitations (Grades and CGPA removed).",
             )
 
             retrain_after_policy = st.checkbox(
@@ -981,8 +981,8 @@ elif menu in ("View Students", "Students"):
         with kpi2:
             st.metric("Departments", students_df["department"].nunique() if "department" in students_df else 0)
         with kpi3:
-            avg_cgpa = float(students_df["cgpa"].dropna().mean()) if "cgpa" in students_df else 0.0
-            st.metric("Cohort Avg CGPA", f"{avg_cgpa:.2f} / 10.0")
+            avg_cie = float(students_df["internal_marks"].dropna().mean()) if "internal_marks" in students_df else 0.0
+            st.metric("Cohort Avg CIE", f"{avg_cie:.1f} / 60")
         with kpi4:
             avg_att = float(students_df["attendance_percentage"].dropna().mean()) if "attendance_percentage" in students_df else 0.0
             st.metric("Cohort Attendance", f"{avg_att:.1f}%")
@@ -1038,7 +1038,7 @@ elif menu in ("View Students", "Students"):
             st.write(f"Showing **{len(filtered_df):,}** of **{len(students_df):,}** students")
 
             # Display table
-            display_cols = ["roll_number", "full_name", "department", "current_year", "semester", "section", "cgpa", "attendance_percentage", "internal_marks", "external_marks"]
+            display_cols = ["roll_number", "full_name", "department", "current_year", "semester", "section", "attendance_percentage", "internal_marks"]
             display_labels = {
                 "roll_number": "Roll No",
                 "full_name": "Full Name",
@@ -1046,10 +1046,8 @@ elif menu in ("View Students", "Students"):
                 "current_year": "Year",
                 "semester": "Sem",
                 "section": "Sec",
-                "cgpa": "CGPA",
                 "attendance_percentage": "Attendance %",
-                "internal_marks": "CIE (/60)",
-                "external_marks": "SEE (/40)",
+                "internal_marks": "CIE Internal (/60)",
             }
             avail_cols = [c for c in display_cols if c in filtered_df.columns]
             styled_df = filtered_df[avail_cols].rename(columns=display_labels)
@@ -1124,21 +1122,16 @@ elif menu in ("View Students", "Students"):
                         st.write(f"**Registered On:** {student_rec.get('created_at', 'N/A')}")
                         st.write(f"**Address:** {student_rec.get('address', 'N/A')}")
 
-                # Academic Performance & 60/40 Examination Standings
+                # Academic Performance & Continuous Evaluation Standings
                 with st.container(border=True):
-                    st.markdown("###### 📊 Academic Performance & Evaluation Status (60/40 Scheme)")
-                    m_cgpa = float(student_rec.get("cgpa") or 0.0)
+                    st.markdown("###### 📊 Continuous Internal Evaluation (CIE) Standing")
                     m_att = float(student_rec.get("attendance_percentage") or 0.0)
                     m_int = float(student_rec.get("internal_marks") or 0.0)
-                    m_ext = float(student_rec.get("external_marks") or 0.0)
-                    m_tot = m_int + m_ext
 
-                    ac1, ac2, ac3, ac4, ac5 = st.columns(5)
-                    ac1.metric("CGPA", f"{m_cgpa:.2f} / 10.0")
+                    ac1, ac2, ac3 = st.columns(3)
+                    ac1.metric("Continuous Internal (CIE)", f"{m_int:.1f} / 60", delta="Passing (≥24/60)" if m_int >= 24.0 else "Remedial Attention", delta_color="normal" if m_int >= 24.0 else "inverse")
                     ac2.metric("Overall Attendance", f"{m_att:.1f}%", delta="Compliant (≥75%)" if m_att >= 75.0 else "⚠️ Shortage (<75%)", delta_color="normal" if m_att >= 75.0 else "inverse")
-                    ac3.metric("Continuous Internal (CIE)", f"{m_int:.1f} / 60", help="Mid (30) + Assignment (10) + Quiz (10) + Viva (10)")
-                    ac4.metric("External End-Sem (SEE)", f"{m_ext:.1f} / 40", help="Summative University Assessment")
-                    ac5.metric("Composite Score", f"{m_tot:.1f} / 100", delta="Combined Mark")
+                    ac3.metric("Standing Status", "Good Standing" if m_int >= 30 and m_att >= 75 else ("Academic Watch" if m_att >= 65 else "Critical Risk"))
 
                 # Registered Courses & Course Assessments
                 stu_courses = [dict(c) for c in (get_student_registered_courses(stu_id, stu_sem) or [])]
@@ -1153,9 +1146,8 @@ elif menu in ("View Students", "Students"):
                         quiz = ca.get("quiz_marks")
                         viva = ca.get("viva_marks")
                         internal = ca.get("internal_total")
-                        ext = ca.get("external_marks")
-                        total = ca.get("overall_total")
                         att = ca.get("course_attendance")
+                        cie_stat = "Pass (≥24)" if (internal or 0) >= 24.0 else "Remedial Needed (<24)"
                         course_rows.append({
                             "Course Code": ca.get("course_code", "—"),
                             "Course Name": ca.get("course_name", "—"),
@@ -1165,8 +1157,7 @@ elif menu in ("View Students", "Students"):
                             "Quiz /10": f"{quiz:.1f}" if quiz is not None else "—",
                             "Viva /10": f"{viva:.1f}" if viva is not None else "—",
                             "CIE /60": f"{internal:.1f}" if internal is not None else "—",
-                            "SEE /40": f"{ext:.1f}" if ext is not None else "—",
-                            "Total /100": f"{total:.1f}" if total is not None else "—",
+                            "CIE Status": cie_stat,
                             "Attendance": f"{att:.1f}%" if att is not None else "—",
                             "Faculty Evaluator": ca.get("faculty_name", "Assigned Faculty"),
                         })
@@ -1267,19 +1258,15 @@ elif menu == "Manage Academic Records":
                         index="ABCDEFGHIJ".index(student_record["section"])
                         if student_record["section"] in "ABCDEFGHIJ" else 0,
                     )
-                    cgpa = st.number_input(
-                        "CGPA (0–10)", min_value=0.0, max_value=10.0,
-                        value=float(student_record["cgpa"] or 0), step=0.01,
-                    )
-                    st.markdown("###### 🔒 Faculty-Governed Evaluations")
-                    st.caption("Student session attendance and course marks can only be submitted by assigned faculty.")
+                    cgpa = float(student_record.get("cgpa") or 0.0)
+                    st.markdown("###### 🔒 Faculty-Governed Continuous Evaluations")
+                    st.caption("Student session attendance and continuous assessment marks can only be submitted by assigned faculty.")
                     att_val = float(student_record["attendance_percentage"] or 0)
                     int_val = float(student_record["internal_marks"] or 0)
-                    ext_val = float(student_record["external_marks"] or 0)
                     st.info(
                         f"• **Session Attendance:** {att_val:.1f}%\n\n"
-                        f"• **Internal CIE Marks:** {int_val:.1f} / 60\n\n"
-                        f"• **External SEE Marks:** {ext_val:.1f} / 40"
+                        f"• **Continuous Internal (CIE) Marks:** {int_val:.1f} / 60\n\n"
+                        "• **Framework:** Pure In-Semester CIE (Grades & External marks removed)"
                     )
                 update_student_record = st.form_submit_button("Save student profile", type="primary")
 
@@ -2038,7 +2025,7 @@ elif menu == "Settings":
             crit_int = st.number_input("Satisfactory Internal CIE Cutoff (/60)", min_value=15.0, max_value=50.0, value=float(policies.get("critical_internal_threshold", 24.0)), step=1.0)
             mid_thresh = st.number_input("Mid-Exam Passing Cutoff (/30)", min_value=5.0, max_value=25.0, value=float(policies.get("mid_exam_threshold", 15.0)), step=1.0)
         with col_p2:
-            dist_cgpa = st.number_input("Distinction Minimum CGPA (/10)", min_value=6.0, max_value=9.5, value=float(policies.get("distinction_cgpa", 8.0)), step=0.1)
+            dist_cgpa = st.number_input("Distinction Minimum CIE Score (/60)", min_value=40.0, max_value=58.0, value=float(policies.get("distinction_cgpa", 48.0)) if float(policies.get("distinction_cgpa", 8.0)) > 10 else 48.0, step=0.5)
             active_algo = st.selectbox("Active Classifier Algorithm", ["Random Forest", "Gradient Boosting", "SVM", "Logistic Regression"], index=0)
             pred_enabled = st.checkbox("Enable Real-Time AI Predictions across Portals", value=bool(policies.get("predictions_enabled", 1)))
 
