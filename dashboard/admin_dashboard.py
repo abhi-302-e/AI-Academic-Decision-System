@@ -159,7 +159,7 @@ menu = st.sidebar.selectbox(
         "Faculty Registration Approvals",
         "Faculty Teaching Requests",
         "Train ML Models",
-        "Recommendations & Predictions Dispatch (Email & SMS)",
+        "Recommendations & Predictions Dispatch (Email & WhatsApp)",
         "Audit Trail & Announcements",
         "View Students",
         "View Faculty Details",
@@ -1911,7 +1911,7 @@ elif menu == "Delete Student":
             st.success("Student Deleted Successfully")
 
 
-elif menu in ["Recommendations & Predictions Dispatch (Email & SMS)", "Communications & Outbound Services"]:
+elif menu in ["Recommendations & Predictions Dispatch (Email & WhatsApp)", "Recommendations & Predictions Dispatch (Email & SMS)", "Communications & Outbound Services"]:
     st.switch_page("dashboard/advisory_dispatch.py")
     admin_email = get_configured_admin_email()
 
@@ -1936,9 +1936,9 @@ elif menu in ["Recommendations & Predictions Dispatch (Email & SMS)", "Communica
 
     with col_sms_stat:
         sms_active = is_sms_service_configured()
-        st.metric("Twilio Cellular SMS Gateway", "● ARMED" if sms_active else "○ SIMULATION / PENDING")
+        st.metric("Twilio WhatsApp Gateway", "● ARMED" if sms_active else "○ SIMULATION / PENDING")
         if not sms_active:
-            st.caption("Provide `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` in environment for live cellular delivery.")
+            st.caption("Provide `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_WHATSAPP_NUMBER` in environment for live WhatsApp delivery.")
 
     st.markdown("#### ✉️ Send Test Live Email from forestnation08@gmail.com")
     with st.form("test_email_form"):
@@ -1953,6 +1953,20 @@ elif menu in ["Recommendations & Predictions Dispatch (Email & SMS)", "Communica
                 st.success(f"✅ {res.get('message')}")
             else:
                 st.warning(f"ℹ️ {res.get('message')}")
+
+    st.markdown("#### 💬 Send Test Live WhatsApp Message via Twilio")
+    with st.form("test_whatsapp_form"):
+        from sms_service import send_academic_update_whatsapp
+        test_wa_to = st.text_input("Recipient WhatsApp Mobile Number (e.g., +919059514176)", "+919059514176")
+        test_wa_body = st.text_area("WhatsApp Message Body", "🎓 [IFHE Academic System] Hello! This is a test WhatsApp message verifying the live gateway.")
+        send_wa_test = st.form_submit_button("🚀 Dispatch Test WhatsApp Message", type="primary")
+
+        if send_wa_test:
+            wa_res = send_academic_update_whatsapp(test_wa_to, test_wa_body, recipient_name="Admin Test")
+            if wa_res.get("success"):
+                st.success(f"✅ {wa_res.get('message')}")
+            else:
+                st.warning(f"ℹ️ {wa_res.get('message')}")
 
     st.markdown("#### 📜 Outbound Delivery Audit Log")
     comm_logs = get_communication_logs(limit=50)

@@ -513,7 +513,7 @@ with profile_tab:
             st.write(f"**Full Name:** {student.get('full_name', '—')}")
             st.write(f"**Roll Number:** `{student.get('roll_number', '—')}`")
             st.write(f"**Enrollment No:** `{enrollment_number}`")
-            st.write(f"**Student Phone Number:** `{student.get('phone', '—')}` 🟢 *Active for SMS*")
+            st.write(f"**Student Phone Number:** `{student.get('phone', '—')}` 🟢 *Active for WhatsApp*")
             st.write(f"**Student Email Address:** `{student.get('email', '—')}` 🟢 *Active for Email*")
             st.write(f"**Date of Birth:** {student.get('date_of_birth') or '2005-06-14'}")
             st.write(f"**Blood Group:** `{student.get('blood_group') or 'O+'}`")
@@ -527,7 +527,7 @@ with profile_tab:
             st.markdown("#### 👨‍👩‍👦 Parent & Guardian Credentials")
             st.write(f"**Father / Guardian Name:** {student.get('parent_name') or student.get('father_name') or 'Guardian Name'}")
             st.write(f"**Mother's Name:** {student.get('mother_name') or 'Mrs. Guardian'}")
-            st.write(f"**Parent Mobile Number:** `{student.get('parent_phone') or '+91 98480 12345'}` 🟢 *Active for Alerts*")
+            st.write(f"**Parent Mobile Number:** `{student.get('parent_phone') or '+91 98480 12345'}` 🟢 *Active for WhatsApp Alerts*")
             st.write(f"**Parent Email Address:** `{student.get('parent_email') or 'parent@example.com'}`")
             st.write(f"**Residential Address:** {student.get('address') or 'Plot #42, Academic City, Hyderabad, Telangana - 500075'}")
             st.write(f"**Parent Qualification:** {student.get('parent_qualification') or 'B.Tech, MBA'}")
@@ -536,13 +536,13 @@ with profile_tab:
 
     # Interactive Form to Update Real-World Phone & Email
     st.markdown("### ✏️ Update Real-World Contact Numbers & Email")
-    st.caption("Enter your actual personal phone number and personal email address to receive live notifications and AI recommendations.")
+    st.caption("Enter your actual personal phone number and personal email address to receive live WhatsApp notifications and AI recommendations.")
 
     with st.form("update_student_contact_form"):
         ecol1, ecol2 = st.columns(2)
         with ecol1:
-            new_phone = st.text_input("Student Mobile Number (for Real SMS Alerts)", value=student.get("phone", ""))
-            new_parent_phone = st.text_input("Parent Mobile Number", value=student.get("parent_phone", ""))
+            new_phone = st.text_input("Student WhatsApp Number (for Real Alerts)", value=student.get("phone", ""))
+            new_parent_phone = st.text_input("Parent WhatsApp Number", value=student.get("parent_phone", ""))
         with ecol2:
             new_email = st.text_input("Student Email Address (for Real Email Advisories)", value=student.get("email", ""))
             new_address = st.text_area("Residential Address", value=student.get("address", ""), height=70)

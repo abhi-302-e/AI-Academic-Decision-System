@@ -19,11 +19,11 @@ from database import (
     get_password_reset_account,
 )
 from email_service import send_email
-from sms_service import send_password_reset_sms
+from sms_service import send_password_reset_whatsapp, send_password_reset_sms
 
 
 st.title("Reset Password")
-st.write("A one-time code will be sent to the email and mobile number registered to your active account.")
+st.write("A one-time code will be sent to the email and WhatsApp number registered to your active account.")
 
 if "password_reset_target" not in st.session_state:
     st.session_state.password_reset_target = None
@@ -45,10 +45,11 @@ if target is None:
             st.error("If the account details and registered mobile number match, a verification code can be sent.")
         else:
             code = f"{secrets.randbelow(1_000_000):06d}"
-            sms_sent = False
+            wa_sent = False
             email_sent = False
             try:
-                sms_sent = send_password_reset_sms(account["phone"], code)
+                res = send_password_reset_whatsapp(account["phone"], code)
+                wa_sent = bool(res and res.get("success"))
             except Exception:
                 pass
             try:
@@ -65,12 +66,12 @@ if target is None:
             except Exception:
                 pass
 
-            if sms_sent or email_sent:
+            if wa_sent or email_sent:
                 delivery_channels = []
                 if email_sent:
                     delivery_channels.append("email")
-                if sms_sent:
-                    delivery_channels.append("SMS")
+                if wa_sent:
+                    delivery_channels.append("WhatsApp")
                 channel_text = " and ".join(delivery_channels)
                 st.session_state.password_reset_target = {
                     "role": role,
@@ -87,8 +88,8 @@ if target is None:
                         f"A reset code was sent through {channel_text}. The code is intentionally not shown in dashboard notifications."
                     )
                 st.success(f"Verification code sent through {channel_text}.")
-                if not (email_sent and sms_sent):
-                    st.warning("One delivery channel is unavailable. Configure both SMS and email for dual-channel verification.")
+                if not (email_sent and wa_sent):
+                    st.warning("One delivery channel is unavailable. Configure both WhatsApp and email for dual-channel verification.")
                 st.rerun()
             else:
                 st.error("The verification code could not be sent. Check the Twilio and Gmail provider configuration.")
@@ -100,7 +101,7 @@ else:
         st.session_state.password_reset_target = None
         st.warning("Too many incorrect attempts. Start again to request a new code.")
     else:
-        st.info("Enter the code sent to your registered email and mobile number. It expires in 10 minutes.")
+        st.info("Enter the code sent to your registered email and WhatsApp number. It expires in 10 minutes.")
         with st.form("complete_password_reset"):
             code = st.text_input("Verification code", max_chars=6)
             new_password = st.text_input("New password", type="password")

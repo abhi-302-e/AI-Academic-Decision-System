@@ -1,13 +1,15 @@
 """
 ===========================================================
 AI-Based Autonomous Academic Decision System
-SMS Notification Service
-Handles live cellular SMS alerts for students and parents.
+WhatsApp Notification Service (Twilio Gateway)
+Handles live WhatsApp alerts for students and parents.
+Replaces cellular SMS with direct WhatsApp messaging.
 ===========================================================
 """
 
 import os
 import re
+import json
 from pathlib import Path
 from database import log_communication
 
@@ -24,6 +26,7 @@ try:
 except ImportError:
     st = None
 
+
 def get_sms_secret(key, default=""):
     """Fetch secret from Streamlit secrets or OS environment."""
     try:
@@ -38,6 +41,8 @@ def get_sms_secret(key, default=""):
     if env_val is None:
         return ""
     return str(env_val).strip()
+
+get_whatsapp_secret = get_sms_secret
 
 
 def normalize_phone_number(phone_number):
@@ -63,23 +68,34 @@ def normalize_phone_number(phone_number):
     return f"+{digits}"
 
 
-def is_sms_service_configured():
-    """Check if Twilio credentials are fully supplied."""
+def is_whatsapp_service_configured():
+    """Check if Twilio WhatsApp credentials are fully supplied."""
     account_sid = get_sms_secret("TWILIO_ACCOUNT_SID")
     auth_token = get_sms_secret("TWILIO_AUTH_TOKEN")
-    from_number = get_sms_secret("TWILIO_FROM_NUMBER") or get_sms_secret("TWILIO_MESSAGING_SERVICE_SID")
-    return bool(account_sid and auth_token and from_number)
+    whatsapp_number = (
+        get_sms_secret("TWILIO_WHATSAPP_NUMBER")
+        or get_sms_secret("TWILIO_FROM_NUMBER")
+        or get_sms_secret("TWILIO_MESSAGING_SERVICE_SID")
+    )
+    return bool(account_sid and auth_token and whatsapp_number)
+
+is_sms_service_configured = is_whatsapp_service_configured
 
 
 def is_whatsapp_enabled():
-    """Check if Twilio WhatsApp channel is enabled."""
-    return bool(get_sms_secret("TWILIO_WHATSAPP_NUMBER") or get_sms_secret("TWILIO_ENABLE_WHATSAPP"))
+    """Twilio WhatsApp channel is permanently enabled for all outbound messaging."""
+    return True
 
 
-def send_academic_update_sms(phone_number, message_body, recipient_name="Student", send_whatsapp=False):
+def send_academic_update_whatsapp(
+    phone_number,
+    message_body,
+    recipient_name="Student",
+    send_whatsapp=True,
+):
     """
-    Send an SMS or WhatsApp message to a mobile number.
-    If Twilio is configured, sends via Twilio API.
+    Send an official WhatsApp notification to a student or parent mobile number via Twilio.
+    If Twilio is configured, sends via Twilio WhatsApp API.
     Otherwise, logs to database with simulated queueing.
     """
     try:
@@ -89,13 +105,16 @@ def send_academic_update_sms(phone_number, message_body, recipient_name="Student
 
     account_sid = get_sms_secret("TWILIO_ACCOUNT_SID")
     auth_token = get_sms_secret("TWILIO_AUTH_TOKEN")
-    messaging_service_sid = get_sms_secret("TWILIO_MESSAGING_SERVICE_SID")
-    from_number = get_sms_secret("TWILIO_FROM_NUMBER")
-    whatsapp_number = get_sms_secret("TWILIO_WHATSAPP_NUMBER")
+    whatsapp_number = (
+        get_sms_secret("TWILIO_WHATSAPP_NUMBER")
+        or get_sms_secret("TWILIO_FROM_NUMBER")
+        or "+17372508034"
+    )
+    content_sid = get_sms_secret("TWILIO_CONTENT_SID") or get_sms_secret("TWILIO_WHATSAPP_CONTENT_SID")
 
-    channel_name = "WhatsApp" if send_whatsapp else "SMS"
+    channel_name = "WhatsApp"
 
-    if not (account_sid and auth_token and (messaging_service_sid or from_number or whatsapp_number)):
+    if not (account_sid and auth_token and whatsapp_number):
         log_communication(
             recipient_type="Student",
             recipient_name=recipient_name,
@@ -105,7 +124,7 @@ def send_academic_update_sms(phone_number, message_body, recipient_name="Student
             subject=f"Academic {channel_name} Alert",
             message=message_body,
             status="Config Required",
-            error_message="Twilio credentials not configured in environment or Streamlit secrets.",
+            error_message="Twilio WhatsApp credentials not configured in environment or Streamlit secrets.",
         )
         return {
             "success": False,
@@ -113,8 +132,8 @@ def send_academic_update_sms(phone_number, message_body, recipient_name="Student
             "phone": norm_phone,
             "channel": channel_name,
             "message": (
-                f"{channel_name} queued for mobile {norm_phone}. "
-                "To deliver live cellular alerts, add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in Streamlit secrets or .env."
+                f"WhatsApp message queued for mobile {norm_phone}. "
+                "To deliver live alerts, add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_WHATSAPP_NUMBER in Streamlit secrets or .env."
             ),
         }
 
@@ -122,23 +141,53 @@ def send_academic_update_sms(phone_number, message_body, recipient_name="Student
         from twilio.rest import Client
         client = Client(account_sid, auth_token)
 
-        if send_whatsapp and whatsapp_number:
-            from_wa = whatsapp_number if whatsapp_number.startswith("whatsapp:") else f"whatsapp:{whatsapp_number}"
-            to_wa = f"whatsapp:{norm_phone}"
-            message = client.messages.create(
-                from_=from_wa,
-                to=to_wa,
-                body=message_body,
-            )
+        # Ensure whatsapp: prefix for both sender and recipient
+        clean_from = whatsapp_number.replace("whatsapp:", "").strip()
+        from_wa = f"whatsapp:{clean_from}"
+
+        clean_to = norm_phone.replace("whatsapp:", "").strip()
+        to_wa = f"whatsapp:{clean_to}"
+
+        msg_options = {
+            "from_": from_wa,
+            "to": to_wa,
+        }
+
+        if content_sid:
+            msg_options["content_sid"] = content_sid
+            msg_options["content_variables"] = json.dumps({"1": recipient_name, "2": message_body[:120]})
         else:
-            message_options = {"to": norm_phone, "body": message_body}
-            if messaging_service_sid:
-                message_options["messaging_service_sid"] = messaging_service_sid
-            elif from_number:
-                message_options["from_"] = from_number
-            else:
-                raise ValueError("No Twilio sender phone number or Messaging Service SID provided.")
-            message = client.messages.create(**message_options)
+            msg_options["body"] = message_body
+
+        try:
+            message = client.messages.create(**msg_options)
+        except Exception as api_err:
+            err_str = str(api_err)
+            if "ContentSid Required" in err_str:
+                # 24-hour session expired or uninitiated in Sandbox
+                guide_msg = (
+                    f"Twilio WhatsApp session expired for {norm_phone}. "
+                    f"Send a WhatsApp message (e.g. 'Hi' or 'join twilio-trial') to {clean_from} to activate the 24-hr session."
+                )
+                log_communication(
+                    recipient_type="Student",
+                    recipient_name=recipient_name,
+                    recipient_contact=norm_phone,
+                    channel=channel_name,
+                    sender_email="forestnation08@gmail.com",
+                    subject=f"Academic {channel_name} Alert (Session Required)",
+                    message=message_body,
+                    status="Session Window Closed",
+                    error_message=guide_msg,
+                )
+                return {
+                    "success": False,
+                    "status": "session_expired",
+                    "phone": norm_phone,
+                    "channel": channel_name,
+                    "message": guide_msg,
+                }
+            raise api_err
 
         log_communication(
             recipient_type="Student",
@@ -157,7 +206,7 @@ def send_academic_update_sms(phone_number, message_body, recipient_name="Student
             "sid": message.sid,
             "phone": norm_phone,
             "channel": channel_name,
-            "message": f"Live {channel_name} successfully delivered to {norm_phone}!",
+            "message": f"Live WhatsApp message successfully delivered to {norm_phone}!",
         }
 
     except Exception as error:
@@ -178,77 +227,91 @@ def send_academic_update_sms(phone_number, message_body, recipient_name="Student
             "status": "failed",
             "phone": norm_phone,
             "channel": channel_name,
-            "message": f"Twilio {channel_name} delivery failed: {err_msg}",
+            "message": f"Twilio WhatsApp delivery failed: {err_msg}",
         }
 
+# Backwards compatible alias so any existing caller automatically routes to WhatsApp
+send_academic_update_sms = send_academic_update_whatsapp
 
-def send_academic_recommendation_sms(phone_number, full_name, roll_no, risk_level, predicted_perf, top_action=""):
-    """Dispatch concise SMS and WhatsApp advisory to student and parent mobile numbers."""
-    action_text = f" Advisory: {top_action[:60]}." if top_action else ""
-    sms_body = (
-        f"[AI Academic System] Dear {full_name} ({roll_no}): "
-        f"Your AI Forecast is {predicted_perf} ({risk_level} Risk).{action_text} "
-        "Log in to the Student ERP portal for your complete intervention plan."
+
+def send_academic_recommendation_whatsapp(
+    phone_number, full_name, roll_no, risk_level, predicted_perf, top_action=""
+):
+    """Dispatch concise WhatsApp advisory to student mobile number."""
+    action_text = f"\n💡 *Key Advisory:* {top_action[:80]}" if top_action else ""
+    wa_body = (
+        f"🎓 *[IFHE AI Academic Decision System]*\n"
+        f"Dear *{full_name}* (`{roll_no}`):\n\n"
+        f"📊 *Forecast:* {predicted_perf}\n"
+        f"🚨 *Risk Tier:* {risk_level} Risk{action_text}\n\n"
+        "👉 Log in to the Student ERP portal for your complete in-semester Continuous Internal Evaluation (CIE) intervention roadmap."
     )
-    # Attempt SMS
-    res = send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=False)
-    # If WhatsApp is enabled, also transmit via WhatsApp
-    if is_whatsapp_enabled():
-        send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=True)
-    return res
+    return send_academic_update_whatsapp(phone_number, wa_body, recipient_name=full_name)
+
+send_academic_recommendation_sms = send_academic_recommendation_whatsapp
 
 
-def send_attendance_shortage_sms(phone_number, full_name, attendance_pct, parent_phone=None):
-    """Send statutory attendance shortage warning via SMS and WhatsApp."""
-    sms_body = (
-        f"[AI Academic System] Dear {full_name}: Your attendance is {attendance_pct:.1f}% "
-        "(below UGC 75% minimum). You are at risk of exam condonation. "
-        "Attend upcoming classes and remedial tutorials immediately."
+def send_attendance_shortage_whatsapp(phone_number, full_name, attendance_pct, parent_phone=None):
+    """Send statutory attendance shortage warning via WhatsApp to student and parent."""
+    wa_body = (
+        f"🚨 *[IFHE Statutory Attendance Warning]*\n"
+        f"Dear *{full_name}*:\n"
+        f"Your attendance regularity is *{attendance_pct:.1f}%* (below UGC 75% minimum requirement).\n"
+        "You are at immediate risk of exam debarment. Attend all upcoming lectures and remedial tutorials without fail."
     )
-    res = send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=False)
-    if is_whatsapp_enabled():
-        send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=True)
+    res = send_academic_update_whatsapp(phone_number, wa_body, recipient_name=full_name)
 
     if parent_phone:
         p_body = (
-            f"[AI Academic System] Attendance for your ward {full_name} is {attendance_pct:.1f}% "
-            "(below UGC 75% limit). Remedial tutorial attendance is mandatory."
+            f"📢 *[IFHE Department Notice to Parent]*\n"
+            f"Attendance for your ward *{full_name}* is *{attendance_pct:.1f}%* (below the statutory 75% limit).\n"
+            "Please advise your ward to attend all scheduled classes and departmental remedial coaching."
         )
-        send_academic_update_sms(parent_phone, p_body, recipient_name=f"Parent of {full_name}", send_whatsapp=False)
-        if is_whatsapp_enabled():
-            send_academic_update_sms(parent_phone, p_body, recipient_name=f"Parent of {full_name}", send_whatsapp=True)
+        send_academic_update_whatsapp(parent_phone, p_body, recipient_name=f"Parent of {full_name}")
 
     return res
 
+send_attendance_shortage_sms = send_attendance_shortage_whatsapp
 
-def send_session_attendance_sms(phone_number, full_name, roll_no, course_code, session_date, is_present, attendance_pct, parent_phone=None):
-    """Dispatch SMS and WhatsApp notification when faculty submits attendance for a session."""
+
+def send_session_attendance_whatsapp(
+    phone_number, full_name, roll_no, course_code, session_date, is_present, attendance_pct, parent_phone=None
+):
+    """Dispatch WhatsApp notification when faculty records classroom attendance."""
+    status_icon = "✅" if is_present else "❌"
     status_str = "PRESENT" if is_present else "ABSENT"
-    sms_body = (
-        f"[AI Academic System] Dear {full_name} ({roll_no}): Attendance for {course_code} on {session_date} "
-        f"is recorded: {status_str}. Current attendance: {attendance_pct:.1f}%."
+    wa_body = (
+        f"📋 *[IFHE Classroom Attendance Update]*\n"
+        f"Student: *{full_name}* (`{roll_no}`)\n"
+        f"Course: *{course_code}* | Date: *{session_date}*\n"
+        f"Status: {status_icon} *{status_str}*\n"
+        f"Current Cumulative Attendance: *{attendance_pct:.1f}%*"
     )
-    res = send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=False)
-    if is_whatsapp_enabled():
-        send_academic_update_sms(phone_number, sms_body, recipient_name=full_name, send_whatsapp=True)
+    res = send_academic_update_whatsapp(phone_number, wa_body, recipient_name=full_name)
 
     if not is_present and parent_phone:
         p_body = (
-            f"[AI Academic System] Alert for Parent of {full_name}: Your ward was marked ABSENT for "
-            f"{course_code} on {session_date}. Current attendance: {attendance_pct:.1f}%."
+            f"⚠️ *[IFHE Absence Alert to Parent]*\n"
+            f"Your ward *{full_name}* was marked *ABSENT* for *{course_code}* on *{session_date}*.\n"
+            f"Current Cumulative Attendance: *{attendance_pct:.1f}%*."
         )
-        send_academic_update_sms(parent_phone, p_body, recipient_name=f"Parent of {full_name}", send_whatsapp=False)
-        if is_whatsapp_enabled():
-            send_academic_update_sms(parent_phone, p_body, recipient_name=f"Parent of {full_name}", send_whatsapp=True)
+        send_academic_update_whatsapp(parent_phone, p_body, recipient_name=f"Parent of {full_name}")
 
     return res
 
+send_session_attendance_sms = send_session_attendance_whatsapp
 
-def send_password_reset_sms(phone_number, code):
-    """Send verification OTP for password reset."""
-    return send_academic_update_sms(
+
+def send_password_reset_whatsapp(phone_number, code):
+    """Send verification OTP for password reset directly to WhatsApp."""
+    return send_academic_update_whatsapp(
         phone_number,
-        f"Your Academic Decision System password reset code is {code}. "
-        "It expires in 10 minutes. Do not share this code.",
+        (
+            f"🔐 *[IFHE AI Academic System]*\n"
+            f"Your password reset verification code is: *{code}*\n\n"
+            "This OTP expires in 10 minutes. For your security, never share this code with anyone."
+        ),
         recipient_name="User",
     )
+
+send_password_reset_sms = send_password_reset_whatsapp

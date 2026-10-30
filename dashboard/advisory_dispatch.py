@@ -60,7 +60,7 @@ if not admin:
 
 # Header
 st.title("📡 Recommendations & Predictions Dispatch Center")
-st.caption("Central institutional outbound delivery engine for AI predictions, explainable recommendations, and daily attendance notifications via Email and SMS.")
+st.caption("Central institutional outbound delivery engine for AI predictions, explainable recommendations, and daily attendance notifications via Email and WhatsApp.")
 
 admin_email = get_configured_admin_email()
 
@@ -81,10 +81,10 @@ with st.container(border=True):
             st.warning("○ Password Required")
 
     with dcol3:
-        sms_active = is_sms_service_configured()
-        st.markdown("**📱 Cellular SMS Gateway**")
-        if sms_active:
-            st.success("● Twilio Armed")
+        wa_active = is_sms_service_configured()
+        st.markdown("**💬 Twilio WhatsApp Gateway**")
+        if wa_active:
+            st.success("● Twilio WhatsApp Armed")
         else:
             st.info("○ Queued / Simulation")
 
@@ -111,7 +111,7 @@ tab_manual, tab_daily, tab_att, tab_logs = st.tabs([
 # =========================================================
 with tab_manual:
     st.subheader("⚡ Send Recommendations & Predictions Now (At Any Time)")
-    st.caption("Administrator-initiated on-demand dispatch. Generate real-time AI predictions, explainable insights, and course action plans, then deliver them immediately to students via Email and SMS.")
+    st.caption("Administrator-initiated on-demand dispatch. Generate real-time AI predictions, explainable insights, and course action plans, then deliver them immediately to students via Email and WhatsApp.")
 
     col_target, col_channels = st.columns([2, 1])
 
@@ -144,7 +144,7 @@ with tab_manual:
     with col_channels:
         st.markdown("**Delivery Channels**")
         send_email_choice = st.checkbox("📧 Deliver via Email", value=True)
-        send_sms_choice = st.checkbox("📱 Deliver via SMS", value=True)
+        send_whatsapp_choice = st.checkbox("💬 Deliver via WhatsApp", value=True)
 
     # Preview count & summary
     conn = get_connection()
@@ -169,8 +169,8 @@ with tab_manual:
     st.info(f"🎯 **Target Summary:** Ready to dispatch AI recommendations & predictions to **{target_count}** student(s).")
 
     if st.button("🚀 Dispatch Recommendations & Predictions Now", type="primary", use_container_width=True):
-        if not send_email_choice and not send_sms_choice:
-            st.error("Please select at least one delivery channel (Email or SMS).")
+        if not send_email_choice and not send_whatsapp_choice:
+            st.error("Please select at least one delivery channel (Email or WhatsApp).")
         elif target_count == 0:
             st.warning("No registered students found matching the selected scope.")
         else:
@@ -203,7 +203,7 @@ with tab_manual:
                 with col_res1:
                     st.metric("Emails Delivered", res.get("emails_sent", 0))
                 with col_res2:
-                    st.metric("SMS Messages Delivered", res.get("sms_sent", 0))
+                    st.metric("WhatsApp Messages Delivered", res.get("whatsapp_sent", res.get("sms_sent", 0)))
 
                 if res.get("logs"):
                     with st.expander("View Student-by-Student Delivery Details", expanded=False):
@@ -216,7 +216,7 @@ with tab_manual:
 # =========================================================
 with tab_daily:
     st.subheader("⏰ Automated Daily 6:00 PM Recommendation & Prediction Dispatcher")
-    st.caption("Configure autonomous daily dispatches scheduled for 6:00 PM (18:00 IST) every evening. When armed, the system scans all registered students across all sections, runs the latest AI predictions, compiles course recommendations, and transmits live Email and SMS notifications.")
+    st.caption("Configure autonomous daily dispatches scheduled for 6:00 PM (18:00 IST) every evening. When armed, the system scans all registered students across all sections, runs the latest AI predictions, compiles course recommendations, and transmits live Email and WhatsApp notifications.")
 
     dispatch_info = get_last_dispatch_info()
     curr_enabled = is_daily_6pm_dispatch_enabled()
@@ -271,7 +271,7 @@ with tab_daily:
 # =========================================================
 with tab_att:
     st.subheader("📋 Section Classroom Attendance Notifications")
-    st.caption("When faculty members record and lock classroom attendance for a section, the system automatically sends Email and SMS alerts to students of that respective section with their status (Present / Absent) and updated attendance percentage.")
+    st.caption("When faculty members record and lock classroom attendance for a section, the system automatically sends Email and WhatsApp alerts to students of that respective section with their status (Present / Absent) and updated attendance percentage.")
 
     curr_att_enabled = is_auto_attendance_enabled()
     with st.container(border=True):
@@ -285,8 +285,8 @@ with tab_att:
                 st.rerun()
         with col_att_info:
             st.markdown("#### Notification Policy")
-            st.write("• **Present Students:** Receive confirmation email and SMS with cumulative attendance %.")
-            st.write("• **Absent Students:** Receive high-priority warning email + SMS, plus mandatory parent SMS alerts.")
+            st.write("• **Present Students:** Receive confirmation email and WhatsApp with cumulative attendance %.")
+            st.write("• **Absent Students:** Receive high-priority warning email + WhatsApp, plus mandatory parent WhatsApp alerts.")
             st.write("• **Institutional Sender:** `forestnation08@gmail.com` (AI Academic Decision System).")
 
     st.markdown("#### 📅 Recorded Attendance Sessions")
@@ -348,7 +348,7 @@ with tab_att:
         chosen_sess_label = st.selectbox("Choose Session to Resend Alerts", list(sel_sess_map.keys()))
         chosen_sess_id = sel_sess_map[chosen_sess_label]
 
-        if st.button("📤 Resend Email & SMS to This Section", type="primary"):
+        if st.button("📤 Resend Email & WhatsApp to This Section", type="primary"):
             with st.spinner("Resending session attendance notifications..."):
                 res = dispatch_section_attendance_notifications(chosen_sess_id)
             if res.get("success"):
@@ -361,11 +361,11 @@ with tab_att:
 # =========================================================
 with tab_logs:
     st.subheader("📜 Real-World Outbound Delivery Audit Logs")
-    st.caption("Immutable transaction ledger recording every Email and SMS message transmitted by the system.")
+    st.caption("Immutable transaction ledger recording every Email and WhatsApp message transmitted by the system.")
 
     filter_col1, filter_col2 = st.columns(2)
     with filter_col1:
-        chan_filter = st.selectbox("Filter Channel", ["All", "Email", "SMS"])
+        chan_filter = st.selectbox("Filter Channel", ["All", "Email", "WhatsApp"])
     with filter_col2:
         log_limit = st.slider("Max Logs to Display", min_value=20, max_value=200, value=50, step=10)
 

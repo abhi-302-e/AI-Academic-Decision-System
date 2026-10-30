@@ -43,6 +43,8 @@ from email_service import (
 from prediction import predict_registered_course, are_course_models_trained
 from recommendation_engine import generate_course_level_recommendations
 from sms_service import (
+    send_academic_update_whatsapp,
+    send_attendance_shortage_whatsapp,
     send_academic_update_sms,
     send_attendance_shortage_sms,
 )
@@ -532,7 +534,7 @@ with tab_att:
                         if is_auto_attendance_enabled():
                             att_res = dispatch_section_attendance_notifications(session_id)
                             if att_res.get("success"):
-                                dispatch_msg = f" 📧📱 Email & SMS notifications dispatched to {att_res.get('total_students')} Section {sel_att_slot['section']} students."
+                                dispatch_msg = f" 📧💬 Email & WhatsApp notifications dispatched to {att_res.get('total_students')} Section {sel_att_slot['section']} students."
                         st.toast(f"✅ Attendance recorded! {dispatch_msg}")
                         st.success(f"Attendance recorded and locked for {len(records)} students. Session ID: #{session_id}.{dispatch_msg}")
                         time.sleep(1.5)
@@ -684,7 +686,7 @@ with tab_risk:
                 st.success(f"Early warning advisory successfully sent to {sent_count} students.")
 
         st.markdown("#### 🚨 Statutory Attendance Shortage Alert (< 75%) Dispatch Center")
-        st.caption(f"Send live Email and SMS notifications to students and parents using admin sender: `{get_configured_admin_email()}`")
+        st.caption(f"Send live Email and WhatsApp notifications to students and parents using admin sender: `{get_configured_admin_email()}`")
 
         shortage_students = [r for r in risk_students if float(dict(r).get("attendance_percentage") or 0) < 75.0]
         if st.button(f"🚀 Dispatch Statutory Shortage Alerts to {len(shortage_students)} Students & Parents", type="primary", use_container_width=True):
@@ -704,7 +706,7 @@ with tab_risk:
                     if e_res.get("success") or e_res.get("status") in ("delivered", "config_required"):
                         email_sent += 1
 
-                    s_res = send_attendance_shortage_sms(
+                    s_res = send_attendance_shortage_whatsapp(
                         phone_number=s_rec.get("phone"),
                         full_name=s_rec.get("full_name"),
                         attendance_pct=att_val,
@@ -713,7 +715,7 @@ with tab_risk:
                     if s_res.get("success") or s_res.get("status") in ("delivered", "config_required"):
                         sms_sent += 1
 
-            st.success(f"✅ Dispatched statutory shortage alerts: {email_sent} Emails and {sms_sent} SMS queued/sent!")
+            st.success(f"✅ Dispatched statutory shortage alerts: {email_sent} Emails and {sms_sent} WhatsApp messages queued/sent!")
 
 
 # =============================================================

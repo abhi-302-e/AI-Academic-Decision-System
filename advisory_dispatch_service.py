@@ -4,9 +4,9 @@ AI-Based Autonomous Academic Decision System
 Advisory & Attendance Outbound Dispatch Service
 
 Handles:
-1. Daily 6:00 PM automated dispatch of AI recommendations & predictions via Email & SMS.
+1. Daily 6:00 PM automated dispatch of AI recommendations & predictions via Email & WhatsApp.
 2. Immediate admin-initiated manual dispatch at any time (All students, section-wise, or individual).
-3. Section-level attendance notifications sent via Email & SMS when faculty submits attendance.
+3. Section-level attendance notifications sent via Email & WhatsApp when faculty submits attendance.
 ===========================================================
 """
 
@@ -39,8 +39,11 @@ from email_service import (
 )
 import sms_service
 from sms_service import (
+    send_academic_recommendation_whatsapp,
     send_academic_recommendation_sms,
+    send_session_attendance_whatsapp,
     send_session_attendance_sms,
+    is_whatsapp_service_configured,
     is_sms_service_configured,
 )
 import recommendation_engine
@@ -228,9 +231,9 @@ def dispatch_section_attendance_notifications(session_id: int):
                 if mail_res.get("success"):
                     emails_sent += 1
 
-            # SMS notification
+            # WhatsApp notification
             if phone:
-                sms_res = send_session_attendance_sms(
+                wa_res = send_session_attendance_whatsapp(
                     phone_number=phone,
                     full_name=s_dict["full_name"],
                     roll_no=s_dict["roll_number"],
@@ -240,7 +243,7 @@ def dispatch_section_attendance_notifications(session_id: int):
                     attendance_pct=att_pct,
                     parent_phone=parent_phone if not is_present else None,
                 )
-                if sms_res.get("success"):
+                if wa_res.get("success"):
                     sms_sent += 1
 
             details.append({
@@ -249,7 +252,7 @@ def dispatch_section_attendance_notifications(session_id: int):
                 "status": "Present" if is_present else "Absent",
             })
 
-        summary = f"Session #{session_id} (Section {section_name}): {len(records)} students processed. {emails_sent} emails, {sms_sent} SMS sent."
+        summary = f"Session #{session_id} (Section {section_name}): {len(records)} students processed. {emails_sent} emails, {sms_sent} WhatsApp messages sent."
 
         # Log automated dispatch
         conn.execute(
@@ -286,22 +289,25 @@ def dispatch_student_recommendations_and_predictions(
     section=None,
     student_id=None,
     send_email_flag=True,
-    send_sms_flag=True,
+    send_whatsapp_flag=True,
     progress_callback=None,
     is_scheduled_daily=False,
+    send_sms_flag=None,
 ):
     """
     Generates updated AI predictions and course-level recommendations for selected students
-    and dispatches them via Email and SMS.
+    and dispatches them via Email and WhatsApp.
 
     Args:
         section (str): Filter by Section (e.g. 'A', 'B') or None for all.
         student_id (int): Filter by specific student or None.
         send_email_flag (bool): Whether to dispatch emails.
-        send_sms_flag (bool): Whether to dispatch SMS.
+        send_whatsapp_flag (bool): Whether to dispatch WhatsApp messages.
         progress_callback (callable): Optional callback(current, total, status_text).
         is_scheduled_daily (bool): Flag indicating if this was triggered by the 6 PM scheduler.
     """
+    if send_sms_flag is not None:
+        send_whatsapp_flag = send_sms_flag
     init_dispatch_settings_table()
     conn = get_connection()
     try:
@@ -413,10 +419,10 @@ def dispatch_student_recommendations_and_predictions(
             else:
                 email_status = e_res.get("status", "Failed")
 
-        # Dispatch SMS
-        if send_sms_flag and s_phone:
+        # Dispatch WhatsApp
+        if send_whatsapp_flag and s_phone:
             top_rec = recs[0] if recs else "Maintain class attendance."
-            s_res = send_academic_recommendation_sms(
+            w_res = send_academic_recommendation_whatsapp(
                 phone_number=s_phone,
                 full_name=full_name,
                 roll_no=roll_no,
@@ -424,11 +430,11 @@ def dispatch_student_recommendations_and_predictions(
                 predicted_perf=predicted_perf,
                 top_action=top_rec[:50],
             )
-            if s_res.get("success"):
+            if w_res.get("success"):
                 sms_sent += 1
                 sms_status = "Delivered"
             else:
-                sms_status = s_res.get("status", "Failed")
+                sms_status = w_res.get("status", "Failed")
 
         logs.append({
             "roll_number": roll_no,
@@ -446,7 +452,7 @@ def dispatch_student_recommendations_and_predictions(
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     today_str = date.today().isoformat()
     scope_desc = f"Section {section}" if (section and section != "All Sections") else (f"Student {roll_no}" if student_id else "All Registered Students")
-    summary_text = f"Dispatched to {total_count} students ({emails_sent} emails, {sms_sent} SMS sent) on {now_str}."
+    summary_text = f"Dispatched to {total_count} students ({emails_sent} emails, {sms_sent} WhatsApp messages sent) on {now_str}."
 
     if is_scheduled_daily:
         set_dispatch_setting("last_daily_date", today_str)
