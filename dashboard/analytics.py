@@ -40,11 +40,9 @@ if students_df.empty:
     st.stop()
 
 # Ensure numeric types
-for col in ["cgpa", "attendance_percentage", "internal_marks", "external_marks"]:
+for col in ["attendance_percentage", "internal_marks", "mid_exam_marks", "quiz_marks", "assignment_marks"]:
     if col in students_df.columns:
         students_df[col] = pd.to_numeric(students_df[col], errors="coerce")
-
-students_df["total_marks"] = students_df["internal_marks"].fillna(0) + students_df["external_marks"].fillna(0)
 
 # Top Summary KPIs
 k1, k2, k3, k4, k5 = st.columns(5)

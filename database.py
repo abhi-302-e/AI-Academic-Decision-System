@@ -5306,53 +5306,22 @@ def get_dashboard_statistics():
 
     statistics = {}
 
-    cursor.execute(
-        "SELECT COUNT(*) FROM students"
-    )
-
+    cursor.execute("SELECT COUNT(*) FROM students")
     statistics["total_students"] = cursor.fetchone()[0]
 
-    cursor.execute(
-        "SELECT COUNT(*) FROM faculty"
-    )
-
+    cursor.execute("SELECT COUNT(*) FROM faculty")
     statistics["total_faculty"] = cursor.fetchone()[0]
 
-    cursor.execute("""
-
-    SELECT COUNT(*)
-
-    FROM attendance
-
-    WHERE attendance_percentage < 75
-
-    """)
-
+    cursor.execute("SELECT COUNT(*) FROM students WHERE attendance_percentage < 75")
     statistics["low_attendance"] = cursor.fetchone()[0]
 
-    cursor.execute("""
-
-    SELECT COUNT(*)
-
-    FROM recommendations
-
-    WHERE risk_level='High'
-
-    """)
-
+    cursor.execute("SELECT COUNT(*) FROM students WHERE attendance_percentage < 65 OR internal_marks < 24")
     statistics["high_risk_students"] = cursor.fetchone()[0]
 
-    cursor.execute("""
-
-    SELECT AVG(cgpa)
-
-    FROM students
-
-    """)
-
-    cgpa = cursor.fetchone()[0]
-
-    statistics["average_cgpa"] = round(cgpa, 2) if cgpa else 0
+    cursor.execute("SELECT AVG(internal_marks) FROM students")
+    avg_int = cursor.fetchone()[0]
+    statistics["average_internal"] = round(avg_int, 2) if avg_int else 0.0
+    statistics["average_cgpa"] = statistics["average_internal"]
 
     connection.close()
 

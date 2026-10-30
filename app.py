@@ -61,7 +61,7 @@ role = st.session_state.get("role")
 if role == "Student":
     pages = [
         st.Page("dashboard/student_dashboard.py", title="Student Dashboard", icon="🎓", default=True),
-        st.Page("dashboard/ai_hub.py", title="AI Academic Hub", icon="✨"),
+        st.Page("dashboard/ai_hub.py", title="AI Learning & Tutor Hub", icon="✨"),
     ]
 elif role == "Faculty":
     pages = [
@@ -72,7 +72,7 @@ elif role == "Admin":
     pages = {
         "Administration": [
             st.Page("dashboard/admin_dashboard.py", title="Admin Dashboard", icon="🛡️", default=True),
-            st.Page("dashboard/ai_hub.py", title="AI Academic Hub", icon="✨"),
+            st.Page("dashboard/admin_ai.py", title="Institutional AI Command Center", icon="🧠"),
             st.Page("dashboard/advisory_dispatch.py", title="Recommendations & Predictions Dispatch", icon="📡"),
             st.Page("dashboard/student_approvals.py", title="Student Approvals", icon="📋"),
             st.Page("dashboard/analytics.py", title="Analytics", icon="📊"),

@@ -25,13 +25,7 @@ if str(ROOT_DIR) not in sys.path:
 from database import get_connection, get_all_students, get_student_by_roll
 import ai_upgrades as ai
 
-st.set_page_config(
-    page_title="AI Academic Intelligence Hub",
-    page_icon="✨",
-    layout="wide",
-)
-
-st.title("✨ Next-Gen AI Academic Intelligence Hub (v2.0)")
+st.title("✨ Student AI Learning & Academic Tutor Hub (v2.0)")
 st.caption(
     "10 Advanced AI Academic Decision & Tutoring Systems · "
     "Autonomous In-Semester Continuous Internal Evaluation (CIE) Framework · "
