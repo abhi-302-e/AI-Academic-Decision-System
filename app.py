@@ -40,6 +40,11 @@ def initialize_app_database(schema_revision):
     upgrade_student_personal_and_payment_system()
     upgrade_student_emails_to_gmail()
     ensure_default_admin()
+    try:
+        from advisory_dispatch_service import start_scheduler_service
+        start_scheduler_service()
+    except Exception:
+        pass
 
 
 connection = get_connection()

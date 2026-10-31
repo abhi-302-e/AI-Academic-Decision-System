@@ -134,6 +134,24 @@ def set_daily_6pm_dispatch_enabled(enabled: bool):
     set_dispatch_setting("daily_6pm_enabled", "1" if enabled else "0")
 
 
+def is_daily_6pm_email_enabled():
+    val = get_dispatch_setting("daily_6pm_email_enabled", "1")
+    return val in ("1", "true", "True")
+
+
+def set_daily_6pm_email_enabled(enabled: bool):
+    set_dispatch_setting("daily_6pm_email_enabled", "1" if enabled else "0")
+
+
+def is_daily_6pm_whatsapp_enabled():
+    val = get_dispatch_setting("daily_6pm_whatsapp_enabled", "0")
+    return val in ("1", "true", "True")
+
+
+def set_daily_6pm_whatsapp_enabled(enabled: bool):
+    set_dispatch_setting("daily_6pm_whatsapp_enabled", "1" if enabled else "0")
+
+
 def get_last_dispatch_info():
     """Return dictionary with last daily 6 PM dispatch date and timestamp."""
     return {
@@ -141,6 +159,8 @@ def get_last_dispatch_info():
         "last_time": get_dispatch_setting("last_daily_time", "Never"),
         "last_summary": get_dispatch_setting("last_daily_summary", "No automated dispatches run yet."),
         "auto_attendance_enabled": get_dispatch_setting("auto_attendance_enabled", "1") in ("1", "true", "True"),
+        "daily_email_enabled": is_daily_6pm_email_enabled(),
+        "daily_whatsapp_enabled": is_daily_6pm_whatsapp_enabled(),
     }
 
 
@@ -293,6 +313,7 @@ def dispatch_student_recommendations_and_predictions(
     progress_callback=None,
     is_scheduled_daily=False,
     send_sms_flag=None,
+    custom_note=None,
 ):
     """
     Generates updated AI predictions and course-level recommendations for selected students
@@ -412,6 +433,7 @@ def dispatch_student_recommendations_and_predictions(
                 attendance=att_val,
                 recommendations_list=recs[:4],
                 xai_summary=xai_summary,
+                custom_note=custom_note or "",
             )
             if e_res.get("success"):
                 emails_sent += 1
@@ -486,6 +508,97 @@ def dispatch_student_recommendations_and_predictions(
 
 
 # =========================================================
+# SINGLE STUDENT PREVIEW & QUICK ACTIONS
+# =========================================================
+
+def get_single_student_advisory_preview(student_id: int):
+    """
+    Return synthesized AI evaluation, CIE score, attendance, risk radar,
+    XAI explanation, and top targeted recommendations for a single student.
+    """
+    conn = get_connection()
+    try:
+        query = """
+            SELECT s.student_id, s.roll_number, s.full_name, s.email, s.phone,
+                   s.parent_phone, s.cgpa, s.attendance_percentage, s.section,
+                   s.semester, s.current_year, s.department
+            FROM students s
+            WHERE s.student_id = ?
+        """
+        student_row = conn.execute(query, (student_id,)).fetchone()
+        if not student_row:
+            return None
+
+        s = dict(student_row)
+        att_val = float(s.get("attendance_percentage") or 75.0)
+        cgpa_val = float(s.get("cgpa") or 7.0)
+        sem = s.get("semester") or 1
+
+        assessments = get_student_course_assessments(student_id, sem)
+        policies = get_academic_policies()
+
+        recs = []
+        if assessments:
+            for ca in assessments:
+                course_recs = generate_course_level_recommendations(ca, policies=policies)
+                for cr in course_recs:
+                    t_str = cr.get("text") if isinstance(cr, dict) else str(cr)
+                    c_code = ca.get("course_code", "Course")
+                    recs.append(f"{c_code}: {t_str}")
+
+        if not recs:
+            recs = [
+                "Maintain continuous class engagement and submit all weekly assignments on time.",
+                "Target minimum 75% attendance in all core lectures and laboratory practicals.",
+                "Attend departmental tutorial problem-solving sessions and peer mentorship."
+            ]
+
+        predicted_perf = "First Class / Good"
+        risk_level = "Low" if att_val >= 75.0 and cgpa_val >= 6.5 else ("Medium" if att_val >= 65.0 else "High")
+
+        if assessments:
+            avg_score = sum(float(a.get("overall_total") or 60.0) for a in assessments) / len(assessments)
+            if avg_score >= 75.0:
+                predicted_perf = "Distinction"
+            elif avg_score >= 50.0:
+                predicted_perf = "Pass"
+            else:
+                predicted_perf = "At-Risk / Remedial"
+
+        xai_summary = (
+            f"Evaluated against pure 60-mark Continuous Internal Evaluation (CIE) architecture. "
+            f"Current attendance regularity is {att_val:.1f}%, with continuous performance at {cgpa_val:.1f}/60.0. "
+            f"{'Statutory attendance remediation required.' if att_val < 75.0 else 'Academic trajectory is on track.'}"
+        )
+
+        return {
+            "student": s,
+            "attendance": att_val,
+            "cie_marks": cgpa_val,
+            "predicted_perf": predicted_perf,
+            "risk_level": risk_level,
+            "xai_summary": xai_summary,
+            "recommendations": recs[:5],
+        }
+    finally:
+        conn.close()
+
+
+def update_student_email_in_db(student_id: int, new_email: str):
+    """Quick update of student's email address in database."""
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE students SET email = ? WHERE student_id = ?", (new_email.strip(), student_id))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error updating student email: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+# =========================================================
 # BACKGROUND 6:00 PM AUTOMATED SCHEDULER
 # =========================================================
 
@@ -494,25 +607,29 @@ _scheduler_lock = threading.Lock()
 
 def check_and_run_daily_6pm_dispatch():
     """
-    Check if current local time is at or past 18:00 (6:00 PM),
+    Check if current Indian Standard Time (IST) is at or past 18:00 (6:00 PM),
     and if today's daily batch has not been executed yet.
-    If conditions are met and scheduler is enabled, executes dispatch.
+    If conditions are met and scheduler is enabled, executes automated dispatch.
     """
     if not is_daily_6pm_dispatch_enabled():
         return False
 
-    now = datetime.now()
-    today_str = date.today().isoformat()
+    from datetime import timezone, timedelta
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(IST)
+    today_str = now_ist.date().isoformat()
     last_run_date = get_dispatch_setting("last_daily_date", "")
 
-    # Trigger if 18:00 or later and not run today
-    if now.hour >= 18 and last_run_date != today_str:
-        print(f"[Scheduler] Daily 6:00 PM trigger activated on {now.isoformat()}. Dispatching recommendations...")
+    # Trigger if 18:00 (6:00 PM IST) or later and not run today
+    if now_ist.hour >= 18 and last_run_date != today_str:
+        print(f"[Scheduler] Daily 6:00 PM IST trigger activated on {now_ist.isoformat()}. Dispatching recommendations & predictions...")
         try:
+            send_email = is_daily_6pm_email_enabled()
+            send_wa = is_daily_6pm_whatsapp_enabled()
             res = dispatch_student_recommendations_and_predictions(
                 section=None,
-                send_email_flag=True,
-                send_whatsapp_flag=True,
+                send_email_flag=send_email,
+                send_whatsapp_flag=send_wa,
                 is_scheduled_daily=True,
             )
             print(f"[Scheduler] Completed: {res.get('message')}")
@@ -525,7 +642,7 @@ def check_and_run_daily_6pm_dispatch():
 
 
 def _scheduler_worker():
-    """Background loop checking every 45 seconds for 6:00 PM trigger."""
+    """Background loop checking every 45 seconds for 6:00 PM IST trigger."""
     while True:
         try:
             check_and_run_daily_6pm_dispatch()
@@ -541,8 +658,8 @@ def start_scheduler_service():
         if _scheduler_thread is None or not _scheduler_thread.is_alive():
             _scheduler_thread = threading.Thread(target=_scheduler_worker, daemon=True, name="AcademicAdvisory6PMScheduler")
             _scheduler_thread.start()
-            print("[Scheduler] Automated Daily 6:00 PM Advisory Dispatcher background service started.")
+            print("[Scheduler] Automated Daily 6:00 PM IST Advisory Dispatcher background service active.")
 
 
-# Scheduler can be started on demand by admin dashboard or explicitly
+# Scheduler can be started on demand or via app.py
 # start_scheduler_service()

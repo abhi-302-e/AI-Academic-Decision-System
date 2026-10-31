@@ -168,6 +168,7 @@ def send_student_recommendations_email(
     attendance,
     recommendations_list,
     xai_summary="",
+    custom_note="",
 ):
     """
     Dispatch student's academic prediction, risk radar, and recommendations.
@@ -187,6 +188,8 @@ def send_student_recommendations_email(
             recs_text += f"{idx}. {r}\n"
             recs_html_items += f"<li style='margin-bottom: 8px;'>{r}</li>"
 
+    note_section_plain = f"\nPersonalized Counselor / Faculty Note:\n{custom_note}\n" if custom_note else ""
+
     plain_body = f"""Dear {full_name},
 
 This is an official academic advisory notice from the AI Academic Decision System.
@@ -204,7 +207,7 @@ AI Predictive Intelligence Forecast:
 
 Model Explainability (XAI) Insight:
 {xai_summary or 'Continuous assessment indicators evaluated for proactive academic advising.'}
-
+{note_section_plain}
 Targeted Action Recommendations:
 {recs_text}
 
@@ -260,6 +263,13 @@ Sender: {get_configured_admin_email()}
                     <b>Explainable AI (XAI) Insight:</b> {xai_summary}
                 </div>
                 ''' if xai_summary else ''}
+
+                {f'''
+                <div style="background: #fffbeb; border: 1px solid #fef3c7; border-left: 4px solid #f59e0b; padding: 14px; border-radius: 6px; margin: 18px 0; font-size: 13px; color: #92400e;">
+                    <div style="font-weight: 700; text-transform: uppercase; font-size: 11px; margin-bottom: 4px; color: #b45309;">📝 Personalized Academic Counselor Note</div>
+                    {custom_note}
+                </div>
+                ''' if custom_note else ''}
 
                 <h4 style="color: #0f172a; margin: 20px 0 10px 0; font-size: 15px;">🎯 Targeted Recommendations & Action Items:</h4>
                 <ul style="font-size: 13px; color: #334155; line-height: 1.5; padding-left: 20px;">
