@@ -13,6 +13,14 @@ from pathlib import Path
 from database import log_communication
 import streamlit as st
 
+# Auto-load .env credentials
+try:
+    from dotenv import load_dotenv
+    _ENV_FILE = Path(__file__).resolve().parent / ".env"
+    load_dotenv(dotenv_path=_ENV_FILE, override=False)
+except ImportError:
+    pass
+
 
 ADMIN_EMAIL_ADDRESS = "forestnation08@gmail.com"
 

@@ -163,31 +163,65 @@ def send_academic_update_whatsapp(
             message = client.messages.create(**msg_options)
         except Exception as api_err:
             err_str = str(api_err)
-            if "ContentSid Required" in err_str:
-                # 24-hour session expired or uninitiated in Sandbox
-                guide_msg = (
-                    f"Twilio WhatsApp session expired for {norm_phone}. "
-                    f"Send a WhatsApp message (e.g. 'Hi' or 'join twilio-trial') to {clean_from} to activate the 24-hr session."
-                )
-                log_communication(
-                    recipient_type="Student",
-                    recipient_name=recipient_name,
-                    recipient_contact=norm_phone,
-                    channel=channel_name,
-                    sender_email="forestnation08@gmail.com",
-                    subject=f"Academic {channel_name} Alert (Session Required)",
-                    message=message_body,
-                    status="Session Window Closed",
-                    error_message=guide_msg,
-                )
-                return {
-                    "success": False,
-                    "status": "session_expired",
-                    "phone": norm_phone,
-                    "channel": channel_name,
-                    "message": guide_msg,
-                }
-            raise api_err
+            if "The ContentSid is Invalid" in err_str and "content_sid" in msg_options:
+                # Twilio Trial accounts cannot use custom ContentSid templates (Code 20003).
+                # Fallback to direct body in case an active 24-hour inbound session exists.
+                try:
+                    fallback_opts = {"from_": from_wa, "to": to_wa, "body": message_body}
+                    message = client.messages.create(**fallback_opts)
+                    err_str = ""  # Succeeded via direct body!
+                except Exception as fb_err:
+                    err_str = str(fb_err)
+
+            if err_str:
+                if "ContentSid Required" in err_str:
+                    guide_msg = (
+                        f"Twilio WhatsApp 24-hr session window is currently closed for {norm_phone}. "
+                        f"To activate live delivery on Twilio Trial, send 'Hi' or 'join twilio-trial' on WhatsApp to {clean_from}. "
+                        "Once received, Twilio opens a 24-hour direct messaging window."
+                    )
+                    log_communication(
+                        recipient_type="Student",
+                        recipient_name=recipient_name,
+                        recipient_contact=norm_phone,
+                        channel=channel_name,
+                        sender_email="forestnation08@gmail.com",
+                        subject=f"Academic {channel_name} Alert (Session Required)",
+                        message=message_body,
+                        status="Session Window Closed",
+                        error_message=guide_msg,
+                    )
+                    return {
+                        "success": False,
+                        "status": "session_expired",
+                        "phone": norm_phone,
+                        "channel": channel_name,
+                        "message": guide_msg,
+                    }
+                if "The ContentSid is Invalid" in err_str:
+                    guide_msg = (
+                        f"Twilio ContentSid '{content_sid}' is not recognized or not available on a Trial account. "
+                        f"Send 'Hi' from your phone to {clean_from} on WhatsApp to use direct session messaging."
+                    )
+                    log_communication(
+                        recipient_type="Student",
+                        recipient_name=recipient_name,
+                        recipient_contact=norm_phone,
+                        channel=channel_name,
+                        sender_email="forestnation08@gmail.com",
+                        subject=f"Academic {channel_name} Alert (Template Error)",
+                        message=message_body,
+                        status="Invalid Template",
+                        error_message=guide_msg,
+                    )
+                    return {
+                        "success": False,
+                        "status": "invalid_template",
+                        "phone": norm_phone,
+                        "channel": channel_name,
+                        "message": guide_msg,
+                    }
+                raise api_err
 
         log_communication(
             recipient_type="Student",
