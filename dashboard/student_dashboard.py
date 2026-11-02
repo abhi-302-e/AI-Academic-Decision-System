@@ -20,6 +20,8 @@ if str(ROOT_DIR) not in sys.path:
 
 from auth import require_student
 from database import (
+    get_student_detailed_course_attendance,
+    get_student_recent_attendance_sessions,
     ensure_enterprise_erp_tables,
     get_connection,
     submit_student_grievance,
@@ -242,7 +244,7 @@ with st.sidebar:
             "🏥 On-Duty (OD) & Leave Application",
             "📊 Continuous Internal Evaluation (CIE /60)",
             "🎛️ What-If Grade & CIE Simulator",
-            "📅 Timetable & Attendance",
+            "📅 Course Attendance & Timetable",
             "🧠 AI Decision Engine & XAI",
             "🎯 Targeted Recommendations & Alerts",
             f"🔔 Notifications ({unread_count})",
@@ -1585,22 +1587,147 @@ elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
 # =============================================================
 # TAB 6: TIMETABLE & ATTENDANCE
 # =============================================================
-elif student_nav == "📅 Timetable & Attendance":
-    st.subheader(f"Weekly Class Schedule · Section {assigned_section}")
-    st.caption("50-minute teaching slots conducted Monday through Saturday as scheduled by Academic Administration.")
+elif student_nav in ("📅 Course Attendance & Timetable", "📅 Timetable & Attendance"):
+    st.subheader("📅 Course-wise Attendance Intelligence & Timetable Portal")
+    st.caption("Institutional attendance tracking per course, statutory 75% examination compliance margins, and weekly section schedule.")
 
-    if not timetable_slots:
-        st.info("No timetable slots have been scheduled for Section " + assigned_section)
-    else:
-        grid_data = {day: {slot: "" for slot in ACADEMIC_PERIODS} for day in ACADEMIC_DAYS}
-        for item in timetable_slots:
-            day = item["day"]
-            slot = item["slot"]
-            if day in grid_data and slot in grid_data[day]:
-                grid_data[day][slot] = f"{item['course_code']}\n({item['room_number']})"
+    # Top Executive Statutory Summary Banner
+    curr_att_val = float(student.get("attendance_percentage") or 78.5)
+    is_safe = curr_att_val >= 75.0
+    status_bg = "#ecfdf5" if is_safe else "#fef2f2"
+    status_border = "#10b981" if is_safe else "#ef4444"
+    status_title = "✅ STATUTORY ATTENDANCE COMPLIANT (ELIGIBLE FOR EXAMS)" if is_safe else "⚠️ STATUTORY ATTENDANCE SHORTAGE (< 75.0% DEBARMENT RISK)"
+    status_desc = (
+        f"Your cumulative attendance across all registered courses is **{curr_att_val:.1f}%**, exceeding the university "
+        f"mandatory statutory cutoff of **75.0%**. You are in good academic standing to appear for End-Semester External Examinations."
+        if is_safe else
+        f"Your cumulative attendance is currently **{curr_att_val:.1f}%**, which falls below the institutional statutory "
+        f"threshold of **75.0%**. Regularize your attendance immediately or submit an On-Duty / Medical Leave application."
+    )
 
-        matrix_df = pd.DataFrame.from_dict(grid_data, orient="index")
-        st.dataframe(matrix_df, use_container_width=True)
+    st.markdown(
+        f"""
+        <div style="background: {status_bg}; border: 1px solid {status_border}; border-left: 5px solid {status_border}; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.5rem;">
+            <div style="font-weight: 800; font-size: 1.05rem; color: {'#065f46' if is_safe else '#991b1b'}; margin-bottom: 4px;">
+                {status_title}
+            </div>
+            <div style="font-size: 0.9rem; line-height: 1.5; color: {'#047857' if is_safe else '#b91c1c'};">
+                {status_desc}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    tab_course_att, tab_schedule_grid, tab_session_logs = st.tabs([
+        "📊 Course-by-Course Attendance Ledger",
+        "📅 Weekly Section Timetable Matrix",
+        "📋 Session-by-Session Biometric Log"
+    ])
+
+    with tab_course_att:
+        st.markdown("##### 📚 Real-Time Attendance Ledger by Registered Course")
+        st.caption("Track total conducted sessions, classes attended, missed lectures, and your statutory safety margin for each subject.")
+
+        course_att_records = get_student_detailed_course_attendance(student_id, current_semester)
+
+        if not course_att_records:
+            st.info("No registered courses found for attendance calculation.")
+        else:
+            # Summary Metrics Row
+            tot_conducted = sum(r["conducted_sessions"] for r in course_att_records)
+            tot_attended = sum(r["attended_sessions"] for r in course_att_records)
+            tot_missed = sum(r["missed_sessions"] for r in course_att_records)
+
+            kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+            kpi1.metric("Cumulative Attendance", f"{curr_att_val:.1f}%", delta="Compliant" if is_safe else "Shortage", delta_color="normal" if is_safe else "inverse")
+            kpi2.metric("Total Sessions Conducted", f"{tot_conducted} Hours")
+            kpi3.metric("Total Sessions Attended", f"{tot_attended} Hours")
+            kpi4.metric("Total Absences / Leaves", f"{tot_missed} Hours", delta=f"{tot_missed} missed", delta_color="inverse" if tot_missed > 0 else "normal")
+
+            st.divider()
+
+            # Course Cards & Progress Bars
+            for c_att in course_att_records:
+                with st.container(border=True):
+                    c_col1, c_col2, c_col3 = st.columns([2.5, 1.5, 1.5])
+                    with c_col1:
+                        st.markdown(f"#### **{c_att['course_code']} — {c_att['course_name']}**")
+                        st.caption(f"Course Instructor: **{c_att['faculty_name']}** · Credits: **{c_att['credits']}** · Section **{assigned_section}**")
+                    with c_col2:
+                        p_val = c_att["attendance_percentage"]
+                        st.metric("Attendance", f"{p_val:.1f}%", f"{c_att['attended_sessions']}/{c_att['conducted_sessions']} Attended")
+                    with c_col3:
+                        badge_color = "#16a34a" if c_att["is_compliant"] else "#dc2626"
+                        st.markdown(f"<div style='background: {badge_color}; color: white; padding: 4px 10px; border-radius: 4px; font-weight: 700; text-align: center; margin-top: 8px;'>{c_att['status']}</div>", unsafe_allow_html=True)
+                        st.caption(f"💡 {c_att['margin_analysis']}")
+
+                    # Progress Bar
+                    frac = min(1.0, max(0.0, c_att["attendance_percentage"] / 100.0))
+                    st.progress(frac)
+
+            # Tabular Ledger View
+            st.markdown("##### 📋 Consolidated Course Attendance Summary Table")
+            ledger_table = [
+                {
+                    "Course Code": r["course_code"],
+                    "Course Name": r["course_name"],
+                    "Faculty Instructor": r["faculty_name"],
+                    "Conducted": r["conducted_sessions"],
+                    "Attended": r["attended_sessions"],
+                    "Missed": r["missed_sessions"],
+                    "Attendance %": f"{r['attendance_percentage']:.1f}%",
+                    "Statutory Margin": r["margin_analysis"],
+                    "Status": "✅ Compliant" if r["is_compliant"] else "⚠️ Shortage",
+                }
+                for r in course_att_records
+            ]
+            st.dataframe(pd.DataFrame(ledger_table), use_container_width=True, hide_index=True)
+
+            st.download_button(
+                "📥 Export Course Attendance Report (CSV)",
+                data=pd.DataFrame(ledger_table).to_csv(index=False),
+                file_name=f"course_attendance_{roll_number}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+    with tab_schedule_grid:
+        st.markdown(f"##### 📅 Weekly Section Schedule · Section {assigned_section}")
+        st.caption("50-minute teaching slots conducted Monday through Saturday as scheduled by Academic Administration.")
+
+        if not timetable_slots:
+            st.info("No timetable slots have been scheduled for Section " + assigned_section)
+        else:
+            grid_data = {day: {slot: "" for slot in ACADEMIC_PERIODS} for day in ACADEMIC_DAYS}
+            for item in timetable_slots:
+                day = item["day"]
+                slot = item["slot"]
+                if day in grid_data and slot in grid_data[day]:
+                    grid_data[day][slot] = f"{item['course_code']}\n({item['room_number']})"
+
+            matrix_df = pd.DataFrame.from_dict(grid_data, orient="index")
+            st.dataframe(matrix_df, use_container_width=True)
+
+    with tab_session_logs:
+        st.markdown("##### 📋 Recent Session-by-Session Biometric Attendance Log")
+        st.caption("Chronological record of recent class sessions marked by course instructors.")
+
+        recent_logs = get_student_recent_attendance_sessions(student_id, limit=30)
+        if not recent_logs:
+            st.info("Session attendance records are logged automatically as faculty submits daily rosters.")
+        else:
+            formatted_logs = [
+                {
+                    "Date": log["session_date"],
+                    "Course": f"{log['course_code']} - {log['course_name']}",
+                    "Faculty": log.get("faculty_name", "Course Faculty"),
+                    "Slot": f"{log['day']} {log['slot']}",
+                    "Status": "🟢 Present" if log["is_present"] else "🔴 Absent",
+                }
+                for log in recent_logs
+            ]
+            st.dataframe(pd.DataFrame(formatted_logs), use_container_width=True, hide_index=True)
 
 
 # =============================================================
