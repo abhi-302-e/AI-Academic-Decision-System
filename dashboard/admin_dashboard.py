@@ -2005,7 +2005,7 @@ elif menu in ("Notifications & Announcements", "Audit Trail & Announcements"):
         
         with st.form("admin_broadcast_form"):
             b_title = st.text_input("Notice Headline / Title", placeholder="e.g. Schedule for Mid-Semester Examinations 2026-27")
-            b_content = st.text_area("Detailed Announcement Content", placeholder="Enter the complete institutional circular or announcement text...", rows=4)
+            b_content = st.text_area("Detailed Announcement Content", placeholder="Enter the complete institutional circular or announcement text...", height=120)
             
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -2053,7 +2053,7 @@ elif menu in ("Notifications & Announcements", "Audit Trail & Announcements"):
 
         with st.form("admin_student_notif_form"):
             notif_title = st.text_input("Notification Title", placeholder="e.g. Mandatory Document Verification / Remedial Tutorial")
-            notif_msg = st.text_area("Notification Message", placeholder="Enter specific instructions for the recipient(s)...", rows=3)
+            notif_msg = st.text_area("Notification Message", placeholder="Enter specific instructions for the recipient(s)...", height=100)
             
             send_stu_notif = st.form_submit_button("🚀 Send Notification", type="primary", use_container_width=True)
             if send_stu_notif:

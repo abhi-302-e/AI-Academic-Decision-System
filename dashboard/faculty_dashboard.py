@@ -639,7 +639,7 @@ elif faculty_nav == "📢 Send Student Notifications":
         n_message = st.text_area(
             "Notice Body / Detailed Instructions",
             placeholder="Enter the detailed announcement instructions for students...",
-            rows=4
+            height=120
         )
         
         c_opt1, c_opt2 = st.columns(2)
@@ -999,7 +999,7 @@ elif faculty_nav == "📡 Send Predictions & Recommendations":
                     instructor_note = st.text_area(
                         "Custom Faculty Mentoring Advice (Appended to Email)",
                         value=f"Dear {chosen_student['full_name']}, please continue following your continuous assessment study plan. For any doubts in course concepts or problem-solving, please meet me during tutorial hours.",
-                        rows=3,
+                        height=100,
                         key="fac_custom_note"
                     )
                 with col_ch:
@@ -1051,7 +1051,7 @@ elif faculty_nav == "📡 Send Predictions & Recommendations":
         b_fac_note = st.text_area(
             "Course Instructor Note for Section",
             value=f"Academic update from your course instructor: Please review your continuous internal evaluation trajectory and recommended study interventions.",
-            rows=2,
+            height=80,
             key="fac_batch_note"
         )
 
@@ -1139,7 +1139,7 @@ elif faculty_nav == "📡 Send Predictions & Recommendations":
             risk_note = st.text_area(
                 "Remedial Advice Note for Flagged Students",
                 value="Urgent Academic Advisory: Your current continuous internal marks and/or attendance are below passing criteria. Please review the attached AI recommendations and attend mandatory tutorial remediation.",
-                rows=2,
+                height=80,
                 key="fac_risk_area_note"
             )
 

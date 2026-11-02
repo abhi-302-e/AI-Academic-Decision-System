@@ -1084,12 +1084,12 @@ elif student_nav == "⭐ Course & Faculty Feedback":
                 strengths_txt = st.text_area(
                     "What are the key strengths of this course and the instructor's teaching methodology?",
                     placeholder="e.g. Excellent explanation of memory allocation diagrams, timely lab code reviews...",
-                    rows=2
+                    height=80
                 )
                 improve_txt = st.text_area(
                     "Constructive Suggestions for Course Improvement",
                     placeholder="e.g. More practice questions on dynamic arrays before midterm exams...",
-                    rows=2
+                    height=80
                 )
 
                 is_anon = st.checkbox("🔒 Submit Anonymously (Your name and roll number will not be visible to faculty)", value=True)
