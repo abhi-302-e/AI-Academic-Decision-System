@@ -18,6 +18,11 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+import importlib
+import database
+if not hasattr(database, "get_student_detailed_course_attendance") or not hasattr(database, "ensure_enterprise_erp_tables"):
+    importlib.reload(database)
+
 from auth import require_student
 from database import (
     get_student_detailed_course_attendance,

@@ -11,6 +11,11 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))   # Use insert instead of append
 
+import importlib
+import database
+if not hasattr(database, "ensure_enterprise_erp_tables"):
+    importlib.reload(database)
+
 import streamlit as st
 import pandas as pd
 
