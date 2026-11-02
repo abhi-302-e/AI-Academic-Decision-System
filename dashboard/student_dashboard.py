@@ -20,7 +20,7 @@ if str(ROOT_DIR) not in sys.path:
 
 import importlib
 import database
-if not hasattr(database, "get_student_course_attendance_history") or not hasattr(database, "get_student_detailed_course_attendance") or not hasattr(database, "ensure_enterprise_erp_tables"):
+if not hasattr(database, "save_student_whatif_simulation") or not hasattr(database, "get_student_course_attendance_history") or not hasattr(database, "get_student_detailed_course_attendance") or not hasattr(database, "ensure_enterprise_erp_tables"):
     importlib.reload(database)
 
 from auth import require_student
@@ -37,6 +37,8 @@ from database import (
     ensure_course_feedback_table,
     submit_course_feedback,
     get_student_submitted_feedback,
+    save_student_whatif_simulation,
+    get_student_whatif_simulations,
     get_student_by_roll,
     get_student_semester_registration,
     get_student_registered_courses,
@@ -756,6 +758,50 @@ elif student_nav == "🎛️ What-If Grade & CIE Simulator":
                 st.error("⚠️ **CIE In-Semester Deficit:** Your simulated Continuous Internal Evaluation is below the mandatory 24/60 passing benchmark.")
             else:
                 st.success(f"🎉 **On-Track Trajectory:** Standing projected as **{standing}**.")
+
+            st.divider()
+            if st.button("💾 Save This Simulation Scenario to Database", key=f"save_sim_{sim_course['course_id']}", type="primary", use_container_width=True):
+                save_student_whatif_simulation(
+                    student_id=student_id,
+                    course_id=sim_course["course_id"],
+                    course_code=sim_course["course_code"],
+                    course_name=sim_course["course_name"],
+                    sim_mid=sim_mid,
+                    sim_quiz=sim_quiz,
+                    sim_assn=sim_assn,
+                    sim_viva=sim_viva,
+                    sim_see=sim_see,
+                    total_cie=total_cie,
+                    total_100=total_100,
+                    projected_grade=grade,
+                    projected_gpa=gpa,
+                    standing=standing
+                )
+                st.success(f"✅ Simulation scenario for {sim_course['course_code']} saved to permanent academic profile!")
+                st.rerun()
+
+        # Render Past Saved Simulations Table
+        st.markdown("##### 📜 Your Saved What-If Simulation Scenarios")
+        saved_sims = get_student_whatif_simulations(student_id)
+        if not saved_sims:
+            st.caption("No previously saved simulation scenarios found. Adjust sliders and click Save above.")
+        else:
+            sim_rows = [
+                {
+                    "Saved Date": s["created_at"],
+                    "Course": f"{s['course_code']} - {s['course_name']}",
+                    "Mid /30": f"{s['sim_mid']:.1f}",
+                    "Quiz /10": f"{s['sim_quiz']:.1f}",
+                    "Assn /10": f"{s['sim_assn']:.1f}",
+                    "Viva /10": f"{s['sim_viva']:.1f}",
+                    "CIE /60": f"{s['total_cie']:.1f}",
+                    "Total /100": f"{s['total_100']:.1f}",
+                    "Projected Grade": s["projected_grade"],
+                    "Standing": s["standing"]
+                }
+                for s in saved_sims
+            ]
+            st.dataframe(pd.DataFrame(sim_rows), use_container_width=True, hide_index=True)
 
 
 elif student_nav == "🏛️ Portal Overview":

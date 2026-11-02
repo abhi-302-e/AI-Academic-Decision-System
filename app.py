@@ -17,6 +17,7 @@ from database import (
     ensure_course_feedback_table,
     ensure_enterprise_erp_tables,
     ensure_mentoring_notes_table,
+    ensure_comprehensive_storage_tables,
     get_connection,
 )
 
@@ -46,6 +47,7 @@ def initialize_app_database(schema_revision):
     ensure_course_feedback_table()
     ensure_enterprise_erp_tables()
     ensure_mentoring_notes_table()
+    ensure_comprehensive_storage_tables()
     try:
         from advisory_dispatch_service import start_scheduler_service
         start_scheduler_service()
@@ -65,7 +67,7 @@ connection.close()
 if not has_student_table:
     initialize_app_database.clear()
 
-initialize_app_database("enterprise-erp-v2")
+initialize_app_database("enterprise-erp-v3")
 
 role = st.session_state.get("role")
 

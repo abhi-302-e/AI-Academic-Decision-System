@@ -22,7 +22,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from database import get_connection, get_all_students, get_student_by_roll
+from database import get_connection, get_all_students, get_student_by_roll, save_student_ai_chat_message, get_student_ai_chat_history, clear_student_ai_chat_history
 import ai_upgrades as ai
 
 st.title("✨ Student AI Learning & Academic Tutor Hub (v2.0)")
@@ -86,11 +86,16 @@ with tabs[0]:
         chosen_sample = st.selectbox("Or choose a sample question:", ["-- Select --"] + sample_prompts)
 
     with col_t2:
-        st.markdown("##### 💬 Chat with Academic Tutor")
+        st.markdown("##### 💬 Chat with Academic Tutor (Saved to DB)")
+        student_id_val = int(student.get("student_id") or 1)
         if "tutor_history" not in st.session_state:
-            st.session_state.tutor_history = [
-                {"role": "assistant", "content": f"Hello {user_name}! I am your AI Academic Tutor for **{selected_course}**. Ask me any conceptual question, numerical problem, or code debugging doubt, and I'll explain step-by-step!"}
-            ]
+            db_chats = get_student_ai_chat_history(student_id_val, limit=50)
+            if db_chats:
+                st.session_state.tutor_history = [{"role": c["role"], "content": c["message"]} for c in db_chats]
+            else:
+                initial_msg = f"Hello {user_name}! I am your AI Academic Tutor for **{selected_course}**. Ask me any conceptual question, numerical problem, or code debugging doubt, and I'll explain step-by-step!"
+                st.session_state.tutor_history = [{"role": "assistant", "content": initial_msg}]
+                save_student_ai_chat_message(student_id_val, "assistant", initial_msg, selected_course)
 
         for msg in st.session_state.tutor_history:
             with st.chat_message(msg["role"]):
@@ -102,6 +107,7 @@ with tabs[0]:
 
         if user_input:
             st.session_state.tutor_history.append({"role": "user", "content": user_input})
+            save_student_ai_chat_message(student_id_val, "user", user_input, selected_course)
             with st.chat_message("user"):
                 st.markdown(user_input)
 
@@ -126,6 +132,13 @@ with tabs[0]:
                     )
                 resp_placeholder.markdown(response)
                 st.session_state.tutor_history.append({"role": "assistant", "content": response})
+                save_student_ai_chat_message(student_id_val, "assistant", response, selected_course)
+
+        if st.button("🗑️ Clear Stored Chat History", key="clear_chat_db_btn"):
+            clear_student_ai_chat_history(student_id_val)
+            st.session_state.tutor_history = []
+            st.success("Chat history cleared from database.")
+            st.rerun()
 
 # -------------------------------------------------------------
 # TAB 2: PERSONALIZED 7-DAY STUDY PLANNER

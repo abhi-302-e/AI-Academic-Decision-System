@@ -26,6 +26,9 @@ from database import (
     get_course_assessment_roster,
     get_student_by_roll,
     get_course_feedback_records,
+    save_faculty_ai_asset,
+    get_faculty_ai_assets,
+    delete_faculty_ai_asset,
 )
 from advisory_dispatch_service import dispatch_student_recommendations_and_predictions
 
@@ -64,6 +67,7 @@ with st.sidebar:
             "🎯 8. Course Outcome (CO-PO) Attainment",
             "🔍 9. Assessment Anomaly & Variance Inspector",
             "💡 10. Active Learning & Engagement Engine",
+            "📁 11. Saved AI Academic Assets Library",
         ],
         index=0,
         label_visibility="collapsed"
@@ -288,6 +292,11 @@ elif selected_ai_tool.startswith("🎙️ 4."):
     col_v1, col_v2 = st.columns([1, 2])
     with col_v1:
         v_course = st.selectbox("Course Subject", ["CS101 - Programming in C", "EE101 - Electrical Sciences", "PH101 - Applied Physics"])
+        save_viva_btn = st.button("💾 Save Viva Rubric to Database", key="save_viva_db_btn", type="primary", use_container_width=True)
+        if save_viva_btn:
+            v_content = f"Standardized Viva Voce Rubric for {v_course} ({v_diff})\n\n1. Conceptual Clarity (3m)\n2. Problem Formulation (3m)\n3. System Context (2m)\n4. Analytical Defense (2m)"
+            aid = save_faculty_ai_asset(faculty_id, faculty_name, "rubric", None, v_course[:5], f"Viva Rubric — {v_course} ({v_diff})", v_content)
+            st.success(f"✅ Viva Rubric saved to Institutional Database (Asset ID #{aid})!")
         v_diff = st.selectbox("Viva Rigor", ["Standard Comprehensive", "Advanced Remedial", "Honors Level"])
         st.markdown("##### 🎯 10-Point CIE Viva Allocation")
         st.markdown("""
@@ -333,6 +342,10 @@ elif selected_ai_tool.startswith("📅 5."):
         {"Week": "Week 13–14", "Topics Covered": "File Handling, Command-Line Args, Revision", "CIE Milestone": "Final CIE Score Lockdown (/60)", "Status": "Upcoming"},
     ]
     st.dataframe(pd.DataFrame(timeline_data), use_container_width=True, hide_index=True)
+    if st.button("💾 Save 14-Week Roadmap to Database", key="save_pace_db_btn", type="primary"):
+        p_content = "\n".join([f"{r['Week']}: {r['Topics Covered']} [{r['CIE Milestone']}]" for r in timeline_data])
+        aid = save_faculty_ai_asset(faculty_id, faculty_name, "pacing_guide", None, "ALL", "14-Week Course Roadmap & CIE Milestones", p_content)
+        st.success(f"✅ Course Roadmap permanently recorded in Institutional Database (Asset ID #{aid})!")
 
 # -------------------------------------------------------------
 # TOOL 6: STUDENT FEEDBACK & SENTIMENT PULSE
@@ -445,6 +458,10 @@ elif selected_ai_tool.startswith("🎯 8."):
 
     st.markdown("#### 📈 AI OBE Recommendations")
     st.warning("⚠️ **CO3 Attainment Gap:** CO3 attainment is at 58.0% (below 60% institutional benchmark). Recommended intervention: Schedule 2 mandatory laboratory tutorial modules focused on pointer memory tracking before SEE exams.")
+    if st.button("💾 Save NBA CO-PO Attainment Report to Database", key="save_copo_db_btn", type="primary"):
+        co_content = "\n".join([f"{r['Course Outcome']}: {r['Attainment %']} ({r['Attainment Level']})" for r in co_data])
+        aid = save_faculty_ai_asset(faculty_id, faculty_name, "copo_report", None, "CS101", "NBA/NAAC CO-PO Direct Attainment Audit", co_content)
+        st.success(f"✅ OBE Attainment Report stored in Institutional Database (Asset ID #{aid})!")
 
 # -------------------------------------------------------------
 # TOOL 9: ASSESSMENT ANOMALY & VARIANCE INSPECTOR
@@ -473,6 +490,10 @@ elif selected_ai_tool.startswith("💡 10."):
     st.caption("Instant 5-minute Think-Pair-Share challenges, live interactive polls, and whiteboard coding puzzles.")
 
     eng_topic = st.selectbox("Select Lecture Concept", ["Pointers and Memory Addresses", "Recursion Base Cases", "Binary Search vs Linear Search", "Dynamic Struct Allocation"])
+    if st.button("💾 Save Active Learning Plan to Database", key="save_active_db_btn", type="primary"):
+        act_content = f"Active Learning Prompt for {eng_topic}:\n5-Minute Think-Pair-Share Challenge: Pointer dereference swap puzzle and stack memory diagram."
+        aid = save_faculty_ai_asset(faculty_id, faculty_name, "active_learning", None, "CS101", f"Active Learning Plan — {eng_topic}", act_content)
+        st.success(f"✅ In-Class Active Learning Plan saved in Database (Asset ID #{aid})!")
 
     st.markdown(f"#### 🎯 Active Learning Prompts for: **{eng_topic}**")
     with st.container(border=True):
@@ -493,3 +514,64 @@ elif selected_ai_tool.startswith("💡 10."):
             """
         )
         st.success("✅ Proven Pedagogical Impact: Increases concept retention in memory management by 35% compared to passive lecture delivery.")
+
+# -------------------------------------------------------------
+# TOOL 11: SAVED AI ACADEMIC ASSETS LIBRARY
+# -------------------------------------------------------------
+elif selected_ai_tool.startswith("📁 11."):
+    st.subheader("📁 Saved AI Academic Assets Library")
+    st.caption("Institutional permanent repository of your AI-generated Question Papers, Remedial Worksheets, Viva Rubrics, Pacing Guides, and CO-PO Attainment Reports.")
+
+    lib_col1, lib_col2 = st.columns([2, 1])
+    with lib_col1:
+        type_filter = st.selectbox(
+            "Filter by Asset Category",
+            ["All", "exam_paper", "worksheet", "rubric", "pacing_guide", "copo_report", "active_learning"],
+            index=0
+        )
+    with lib_col2:
+        search_kw = st.text_input("Search Title or Course", placeholder="e.g. MA101, Quiz, Unit 2...")
+
+    saved_assets = get_faculty_ai_assets(faculty_id=faculty_id, asset_type=type_filter if type_filter != "All" else None)
+
+    if search_kw.strip():
+        kw = search_kw.strip().lower()
+        saved_assets = [a for a in saved_assets if kw in a["title"].lower() or kw in str(a.get("course_code", "")).lower() or kw in a["content"].lower()]
+
+    st.markdown(f"**Found {len(saved_assets)} saved academic assets**")
+    st.divider()
+
+    if not saved_assets:
+        st.info("No saved AI academic assets found in database. Use any of the 10 tools on the left to generate and store materials.")
+    else:
+        for asset in saved_assets:
+            with st.container(border=True):
+                a_c1, a_c2 = st.columns([4, 1.2])
+                with a_c1:
+                    type_labels = {
+                        "exam_paper": "📝 Exam Question Paper",
+                        "worksheet": "🤖 Remedial Assignment",
+                        "rubric": "🎙️ Viva Voce Rubric",
+                        "pacing_guide": "📅 14-Week Pacing Guide",
+                        "copo_report": "🎯 CO-PO Attainment",
+                        "active_learning": "💡 Active Learning Plan",
+                    }
+                    badge = type_labels.get(asset["asset_type"], asset["asset_type"])
+                    st.markdown(f"#### **{asset['title']}**")
+                    st.caption(f"**{badge}** · Course: **{asset.get('course_code') or 'General'}** · Generated: **{asset['created_at']}** · Asset ID: `#{asset['asset_id']}`")
+                with a_c2:
+                    st.download_button(
+                        "📥 Download Asset",
+                        data=asset["content"],
+                        file_name=f"asset_{asset['asset_id']}_{asset['asset_type']}.txt",
+                        mime="text/plain",
+                        key=f"dl_asset_{asset['asset_id']}",
+                        use_container_width=True
+                    )
+                    if st.button("🗑️ Delete Asset", key=f"del_asset_{asset['asset_id']}", use_container_width=True):
+                        delete_faculty_ai_asset(asset["asset_id"], faculty_id=faculty_id)
+                        st.success("Asset deleted from database.")
+                        st.rerun()
+
+                with st.expander("📄 View Stored Content"):
+                    st.markdown(asset["content"])

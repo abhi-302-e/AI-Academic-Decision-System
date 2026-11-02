@@ -2851,6 +2851,273 @@ def get_faculty_mentoring_notes(student_id: int, faculty_id: int = None):
 
 
 # ===========================================================
+# ENTERPRISE COMPREHENSIVE DATA PERSISTENCE SUITE
+# ===========================================================
+
+def ensure_comprehensive_storage_tables(connection=None):
+    """
+    Ensures all AI Hub assets, student chat transcripts, What-If simulation records,
+    and institutional strategic decision logs are permanently persisted in SQLite.
+    """
+    should_close = False
+    if connection is None:
+        connection = get_connection()
+        should_close = True
+
+    try:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS faculty_ai_generated_assets (
+                asset_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                faculty_id INTEGER,
+                faculty_name TEXT,
+                asset_type TEXT NOT NULL,
+                course_id INTEGER,
+                course_code TEXT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                metadata_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS student_ai_chats (
+                chat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                message TEXT NOT NULL,
+                subject TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS student_whatif_simulations (
+                simulation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                course_id INTEGER,
+                course_code TEXT,
+                course_name TEXT,
+                sim_mid REAL,
+                sim_quiz REAL,
+                sim_assn REAL,
+                sim_viva REAL,
+                sim_see REAL,
+                total_cie REAL,
+                total_100 REAL,
+                projected_grade TEXT,
+                projected_gpa REAL,
+                standing TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_strategic_ai_logs (
+                log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_username TEXT,
+                decision_type TEXT NOT NULL,
+                parameters_json TEXT,
+                recommendation_text TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.commit()
+    finally:
+        if should_close:
+            connection.close()
+
+
+def save_faculty_ai_asset(faculty_id: int, faculty_name: str, asset_type: str,
+                          course_id: int, course_code: str, title: str,
+                          content: str, metadata_json: str = None) -> int:
+    ensure_comprehensive_storage_tables()
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO faculty_ai_generated_assets
+            (faculty_id, faculty_name, asset_type, course_id, course_code, title, content, metadata_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (faculty_id, faculty_name, asset_type, course_id, course_code, title, content, metadata_json)
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_faculty_ai_assets(faculty_id: int = None, asset_type: str = None, limit: int = 100):
+    ensure_comprehensive_storage_tables()
+    conn = get_connection()
+    try:
+        query = "SELECT * FROM faculty_ai_generated_assets WHERE 1=1"
+        params = []
+        if faculty_id is not None:
+            query += " AND faculty_id = ?"
+            params.append(faculty_id)
+        if asset_type and asset_type != "All":
+            query += " AND asset_type = ?"
+            params.append(asset_type)
+        query += " ORDER BY asset_id DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def delete_faculty_ai_asset(asset_id: int, faculty_id: int = None) -> bool:
+    ensure_comprehensive_storage_tables()
+    conn = get_connection()
+    try:
+        if faculty_id is not None:
+            conn.execute("DELETE FROM faculty_ai_generated_assets WHERE asset_id = ? AND faculty_id = ?", (asset_id, faculty_id))
+        else:
+            conn.execute("DELETE FROM faculty_ai_generated_assets WHERE asset_id = ?", (asset_id,))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def save_student_ai_chat_message(student_id: int, role: str, message: str, subject: str = None) -> int:
+    ensure_comprehensive_storage_tables()
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO student_ai_chats (student_id, role, message, subject)
+            VALUES (?, ?, ?, ?)
+            """,
+            (student_id, role, message, subject)
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_student_ai_chat_history(student_id: int, limit: int = 60):
+    ensure_comprehensive_storage_tables()
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT role, message, subject, created_at
+            FROM student_ai_chats
+            WHERE student_id = ?
+            ORDER BY chat_id ASC
+            LIMIT ?
+            """,
+            (student_id, limit)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def clear_student_ai_chat_history(student_id: int):
+    ensure_comprehensive_storage_tables()
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM student_ai_chats WHERE student_id = ?", (student_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_student_whatif_simulation(student_id: int, course_id: int, course_code: str,
+                                   course_name: str, sim_mid: float, sim_quiz: float,
+                                   sim_assn: float, sim_viva: float, sim_see: float,
+                                   total_cie: float, total_100: float, projected_grade: str,
+                                   projected_gpa: float, standing: str) -> int:
+    ensure_comprehensive_storage_tables()
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO student_whatif_simulations
+            (student_id, course_id, course_code, course_name, sim_mid, sim_quiz,
+             sim_assn, sim_viva, sim_see, total_cie, total_100, projected_grade,
+             projected_gpa, standing)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (student_id, course_id, course_code, course_name, sim_mid, sim_quiz,
+             sim_assn, sim_viva, sim_see, total_cie, total_100, projected_grade,
+             projected_gpa, standing)
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_student_whatif_simulations(student_id: int, limit: int = 25):
+    ensure_comprehensive_storage_tables()
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM student_whatif_simulations
+            WHERE student_id = ?
+            ORDER BY simulation_id DESC
+            LIMIT ?
+            """,
+            (student_id, limit)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def save_admin_strategic_ai_log(admin_username: str, decision_type: str,
+                                parameters_json: str, recommendation_text: str) -> int:
+    ensure_comprehensive_storage_tables()
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO admin_strategic_ai_logs
+            (admin_username, decision_type, parameters_json, recommendation_text)
+            VALUES (?, ?, ?, ?)
+            """,
+            (admin_username, decision_type, parameters_json, recommendation_text)
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_admin_strategic_ai_logs(limit: int = 50):
+    ensure_comprehensive_storage_tables()
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM admin_strategic_ai_logs
+            ORDER BY log_id DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+
+# ===========================================================
 # STUDENT COURSE-WISE ATTENDANCE INTELLIGENCE
 # ===========================================================
 
