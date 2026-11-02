@@ -2379,6 +2379,204 @@ if menu == "Update Faculty":
     print("Database Initialized Successfully.")
 
 
+
+# ===========================================================
+# COURSE & FACULTY FEEDBACK SYSTEM
+# ===========================================================
+
+def ensure_course_feedback_table(connection=None):
+    close_after = False
+    if connection is None:
+        connection = get_connection()
+        close_after = True
+    try:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS course_feedback (
+                feedback_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                course_id INTEGER NOT NULL,
+                faculty_id INTEGER,
+                section TEXT,
+                semester INTEGER DEFAULT 1,
+                academic_year TEXT DEFAULT '2026-27',
+                rating_teaching INTEGER CHECK(rating_teaching BETWEEN 1 AND 5),
+                rating_content INTEGER CHECK(rating_content BETWEEN 1 AND 5),
+                rating_practical INTEGER CHECK(rating_practical BETWEEN 1 AND 5),
+                rating_fairness INTEGER CHECK(rating_fairness BETWEEN 1 AND 5),
+                rating_overall INTEGER CHECK(rating_overall BETWEEN 1 AND 5),
+                strengths_comment TEXT,
+                improvement_comment TEXT,
+                is_anonymous INTEGER DEFAULT 0,
+                submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (student_id) REFERENCES students(student_id),
+                FOREIGN KEY (course_id) REFERENCES courses(course_id),
+                FOREIGN KEY (faculty_id) REFERENCES faculty(faculty_id)
+            )
+        """)
+        connection.commit()
+    except Exception as e:
+        print(f"Error ensuring course_feedback table: {e}")
+    finally:
+        if close_after:
+            connection.close()
+
+
+def submit_course_feedback(
+    student_id: int,
+    course_id: int,
+    faculty_id: int = None,
+    section: str = None,
+    semester: int = 1,
+    academic_year: str = "2026-27",
+    rating_teaching: int = 5,
+    rating_content: int = 5,
+    rating_practical: int = 5,
+    rating_fairness: int = 5,
+    rating_overall: int = 5,
+    strengths_comment: str = "",
+    improvement_comment: str = "",
+    is_anonymous: int = 0
+):
+    ensure_course_feedback_table()
+    conn = get_connection()
+    try:
+        # Check if already submitted for this student + course + semester
+        existing = conn.execute(
+            """
+            SELECT feedback_id FROM course_feedback
+            WHERE student_id = ? AND course_id = ? AND semester = ?
+            """,
+            (student_id, course_id, semester)
+        ).fetchone()
+
+        if existing:
+            conn.execute(
+                """
+                UPDATE course_feedback
+                SET faculty_id = ?, section = ?, rating_teaching = ?, rating_content = ?,
+                    rating_practical = ?, rating_fairness = ?, rating_overall = ?,
+                    strengths_comment = ?, improvement_comment = ?, is_anonymous = ?,
+                    submitted_at = CURRENT_TIMESTAMP
+                WHERE feedback_id = ?
+                """,
+                (
+                    faculty_id, section, rating_teaching, rating_content,
+                    rating_practical, rating_fairness, rating_overall,
+                    strengths_comment, improvement_comment, is_anonymous,
+                    existing["feedback_id"]
+                )
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO course_feedback (
+                    student_id, course_id, faculty_id, section, semester, academic_year,
+                    rating_teaching, rating_content, rating_practical, rating_fairness, rating_overall,
+                    strengths_comment, improvement_comment, is_anonymous
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    student_id, course_id, faculty_id, section, semester, academic_year,
+                    rating_teaching, rating_content, rating_practical, rating_fairness, rating_overall,
+                    strengths_comment, improvement_comment, is_anonymous
+                )
+            )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error submitting course feedback: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_student_submitted_feedback(student_id: int, semester: int = 1):
+    ensure_course_feedback_table()
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT fb.*, c.course_name, COALESCE(c.catalog_code, c.course_code) AS course_code,
+                   f.full_name AS faculty_name
+            FROM course_feedback fb
+            JOIN courses c ON c.course_id = fb.course_id
+            LEFT JOIN faculty f ON f.faculty_id = fb.faculty_id
+            WHERE fb.student_id = ? AND fb.semester = ?
+            ORDER BY fb.submitted_at DESC
+            """,
+            (student_id, semester)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_course_feedback_records(course_id: int = None, faculty_id: int = None, section: str = None):
+    ensure_course_feedback_table()
+    conn = get_connection()
+    try:
+        query = """
+            SELECT fb.*, c.course_name, COALESCE(c.catalog_code, c.course_code) AS course_code,
+                   f.full_name AS faculty_name,
+                   CASE WHEN fb.is_anonymous = 1 THEN 'Anonymous Student' ELSE s.full_name END AS student_display_name,
+                   CASE WHEN fb.is_anonymous = 1 THEN 'CONFIDENTIAL' ELSE s.roll_number END AS student_roll_no
+            FROM course_feedback fb
+            JOIN courses c ON c.course_id = fb.course_id
+            LEFT JOIN faculty f ON f.faculty_id = fb.faculty_id
+            LEFT JOIN students s ON s.student_id = fb.student_id
+            WHERE 1=1
+        """
+        params = []
+        if course_id:
+            query += " AND fb.course_id = ?"
+            params.append(course_id)
+        if faculty_id:
+            query += " AND fb.faculty_id = ?"
+            params.append(faculty_id)
+        if section:
+            query += " AND fb.section = ?"
+            params.append(section)
+
+        query += " ORDER BY fb.submitted_at DESC"
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def delete_system_announcement(announcement_id: int):
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM system_announcements WHERE announcement_id = ?", (announcement_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error deleting announcement: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def create_bulk_student_notifications(student_ids: list, title: str, message: str):
+    conn = get_connection()
+    _ensure_student_notifications_table(conn)
+    count = 0
+    try:
+        for sid in student_ids:
+            conn.execute(
+                "INSERT INTO student_notifications (student_id, title, message) VALUES (?, ?, ?)",
+                (sid, title, message)
+            )
+            count += 1
+        conn.commit()
+        return count
+    except Exception as e:
+        print(f"Error creating bulk student notifications: {e}")
+        return 0
+    finally:
+        conn.close()
+
+
 # ===========================================================
 # MAIN
 # ===========================================================

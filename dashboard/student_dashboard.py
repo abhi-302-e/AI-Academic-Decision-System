@@ -20,6 +20,9 @@ if str(ROOT_DIR) not in sys.path:
 
 from auth import require_student
 from database import (
+    ensure_course_feedback_table,
+    submit_course_feedback,
+    get_student_submitted_feedback,
     get_student_by_roll,
     get_student_semester_registration,
     get_student_registered_courses,
@@ -227,6 +230,7 @@ with st.sidebar:
             "👤 Personal & Parent Details",
             "💳 Fee Payment & Ledger",
             "📚 Academic Curriculum",
+            "⭐ Course & Faculty Feedback",
             "📊 Continuous Internal Evaluation (CIE /60)",
             "📅 Timetable & Attendance",
             "🧠 AI Decision Engine & XAI",
@@ -982,6 +986,161 @@ elif student_nav == "📚 Academic Curriculum":
 # =============================================================
 # TAB 5: CIE & EXTERNAL GRADEBOOK (60/40) & GRADE CARD
 # =============================================================
+# =============================================================
+# TAB: COURSE & FACULTY FEEDBACK
+# =============================================================
+elif student_nav == "⭐ Course & Faculty Feedback":
+    st.subheader("⭐ Course Curriculum & Faculty Instructional Feedback")
+    st.caption("Provide constructive feedback on your registered courses, instructional clarity, laboratory sessions, and continuous assessment fairness.")
+
+    registered_courses = get_student_registered_courses(student_id, current_semester)
+    submitted_feedbacks = get_student_submitted_feedback(student_id, current_semester)
+    submitted_course_ids = set(fb["course_id"] for fb in submitted_feedbacks)
+
+    fb_col1, fb_col2 = st.columns([1, 1])
+    with fb_col1:
+        st.metric("Total Registered Courses", len(registered_courses))
+    with fb_col2:
+        st.metric("Feedbacks Completed", f"{len(submitted_course_ids)} / {len(registered_courses)}")
+
+    st.divider()
+
+    tab_submit_fb, tab_fb_history = st.tabs([
+        "📝 Submit Course Feedback",
+        "📋 My Submitted Feedback History"
+    ])
+
+    with tab_submit_fb:
+        if not registered_courses:
+            st.info("You do not have any registered courses for the current semester. Please complete semester registration first.")
+        else:
+            course_options = {}
+            for c in registered_courses:
+                status_icon = "✅ (Completed)" if c["course_id"] in submitted_course_ids else "⏳ (Pending)"
+                label = f"{c['course_code']} - {c['course_name']} {status_icon}"
+                course_options[label] = c
+
+            selected_course_label = st.selectbox("Select Course for Feedback", list(course_options.keys()))
+            chosen_c = course_options[selected_course_label]
+            c_id = chosen_c["course_id"]
+
+            # Lookup assigned faculty for this course in student's section
+            conn = get_connection()
+            fac_row = conn.execute(
+                """
+                SELECT f.faculty_id, f.full_name, f.designation
+                FROM timetable t
+                JOIN faculty f ON f.faculty_id = t.faculty_id
+                WHERE t.course_id = ? AND t.section = ?
+                LIMIT 1
+                """,
+                (c_id, assigned_section)
+            ).fetchone()
+            conn.close()
+
+            assigned_faculty_name = fac_row["full_name"] if fac_row else "Department Faculty Instructor"
+            assigned_faculty_id = fac_row["faculty_id"] if fac_row else None
+
+            st.info(f"📘 **Course:** {chosen_c['course_code']} - {chosen_c['course_name']} | 👨‍🏫 **Instructor:** {assigned_faculty_name} (Section {assigned_section})")
+
+            with st.form("student_course_feedback_form"):
+                st.markdown("##### 📊 Academic Rating Dimensions (1 = Unsatisfactory, 5 = Excellent)")
+                
+                r_col1, r_col2 = st.columns(2)
+                with r_col1:
+                    r_teaching = st.select_slider(
+                        "1. Teaching Quality & Conceptual Clarity",
+                        options=[1, 2, 3, 4, 5],
+                        value=5,
+                        format_func=lambda x: f"{x} Star{'s' if x > 1 else ''}"
+                    )
+                    r_content = st.select_slider(
+                        "2. Syllabus Coverage & Course Structure",
+                        options=[1, 2, 3, 4, 5],
+                        value=5,
+                        format_func=lambda x: f"{x} Star{'s' if x > 1 else ''}"
+                    )
+                    r_practical = st.select_slider(
+                        "3. Laboratory & Hands-on Problem Solving Support",
+                        options=[1, 2, 3, 4, 5],
+                        value=5,
+                        format_func=lambda x: f"{x} Star{'s' if x > 1 else ''}"
+                    )
+                with r_col2:
+                    r_fairness = st.select_slider(
+                        "4. Fairness in Continuous Internal Evaluation (CIE /60)",
+                        options=[1, 2, 3, 4, 5],
+                        value=5,
+                        format_func=lambda x: f"{x} Star{'s' if x > 1 else ''}"
+                    )
+                    r_overall = st.select_slider(
+                        "5. Overall Learning Experience in this Course",
+                        options=[1, 2, 3, 4, 5],
+                        value=5,
+                        format_func=lambda x: f"{x} Star{'s' if x > 1 else ''}"
+                    )
+
+                st.markdown("##### 💬 Qualitative Qualitative Observations & Suggestions")
+                strengths_txt = st.text_area(
+                    "What are the key strengths of this course and the instructor's teaching methodology?",
+                    placeholder="e.g. Excellent explanation of memory allocation diagrams, timely lab code reviews...",
+                    rows=2
+                )
+                improve_txt = st.text_area(
+                    "Constructive Suggestions for Course Improvement",
+                    placeholder="e.g. More practice questions on dynamic arrays before midterm exams...",
+                    rows=2
+                )
+
+                is_anon = st.checkbox("🔒 Submit Anonymously (Your name and roll number will not be visible to faculty)", value=True)
+
+                fb_submit = st.form_submit_button("🚀 Submit Course Feedback", type="primary", use_container_width=True)
+                if fb_submit:
+                    success = submit_course_feedback(
+                        student_id=student_id,
+                        course_id=c_id,
+                        faculty_id=assigned_faculty_id,
+                        section=assigned_section,
+                        semester=current_semester,
+                        rating_teaching=r_teaching,
+                        rating_content=r_content,
+                        rating_practical=r_practical,
+                        rating_fairness=r_fairness,
+                        rating_overall=r_overall,
+                        strengths_comment=strengths_txt.strip(),
+                        improvement_comment=improve_txt.strip(),
+                        is_anonymous=1 if is_anon else 0
+                    )
+                    if success:
+                        st.success(f"🎉 **Thank You!** Your feedback for **{chosen_c['course_name']}** has been officially recorded.")
+                        st.rerun()
+                    else:
+                        st.error("Failed to submit feedback. Please try again.")
+
+    with tab_fb_history:
+        st.markdown("##### 📋 Your Feedback Submissions for Semester " + str(current_semester))
+        if submitted_feedbacks:
+            for fb in submitted_feedbacks:
+                with st.container(border=True):
+                    h_col1, h_col2 = st.columns([3, 1])
+                    with h_col1:
+                        st.markdown(f"**{fb['course_code']} - {fb['course_name']}**")
+                        st.caption(f"Instructor: {fb.get('faculty_name', 'Faculty')} | Submitted: {fb['submitted_at']}")
+                    with h_col2:
+                        avg_r = (fb['rating_teaching'] + fb['rating_content'] + fb['rating_practical'] + fb['rating_fairness'] + fb['rating_overall']) / 5.0
+                        st.metric("Avg Rating", f"{avg_r:.1f} / 5.0")
+
+                    st.markdown(
+                        f"• Teaching: **{fb['rating_teaching']}/5** | Content: **{fb['rating_content']}/5** | Practical: **{fb['rating_practical']}/5** | Fairness: **{fb['rating_fairness']}/5** | Overall: **{fb['rating_overall']}/5**"
+                    )
+                    if fb.get("strengths_comment"):
+                        st.markdown(f"**Strengths:** *{fb.get('strengths_comment', '')}*")
+                    if fb.get("improvement_comment"):
+                        st.markdown(f"**Suggestions:** *{fb.get('improvement_comment', '')}*")
+        else:
+            st.info("You have not submitted feedback for any courses yet.")
+
+
 elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
     st.subheader("Continuous Internal Evaluation (CIE /60) Dossier")
     st.markdown(

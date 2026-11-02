@@ -17,6 +17,11 @@ import pandas as pd
 from auth import require_admin
 
 from database import (
+    delete_system_announcement,
+    create_student_notification,
+    create_bulk_student_notifications,
+    ensure_course_feedback_table,
+    get_course_feedback_records,
     get_connection,
     get_course_model_training_data,
     get_all_students,
@@ -161,6 +166,7 @@ menu = st.sidebar.radio(
         "Faculty Teaching Requests",
         "Train ML Models",
         "Recommendations & Predictions Dispatch (Email & WhatsApp)",
+        "Notifications & Announcements",
         "Audit Trail & Announcements",
         "View Students",
         "View Faculty Details",
@@ -1981,47 +1987,113 @@ elif menu in ["Recommendations & Predictions Dispatch (Email & WhatsApp)", "Reco
 # AUDIT TRAIL & ANNOUNCEMENTS
 # ==========================================================
 
-elif menu == "Audit Trail & Announcements":
+elif menu in ("Notifications & Announcements", "Audit Trail & Announcements"):
 
-    st.subheader("📢 Institutional Announcements & Gradebook Audit Trail")
+    st.subheader("📢 Institutional Notifications, Announcements & Audit Trail")
+    st.caption("Broadcast university announcements, dispatch targeted in-app notifications to students & faculty, and monitor compliance logs.")
 
-    st.markdown("#### 📢 Broadcast New Institutional Announcement")
-    with st.form("create_announcement_form"):
-        a_title = st.text_input("Announcement Headline / Title")
-        a_content = st.text_area("Announcement Notice Content")
-        a_col1, a_col2 = st.columns(2)
-        with a_col1:
-            a_prio = st.selectbox("Priority Level", ["Normal", "High", "Urgent"])
-        with a_col2:
-            a_role = st.selectbox("Target Audience", ["All", "Student", "Faculty"])
+    tab_broadcast, tab_direct_stu, tab_active_ann, tab_audit = st.tabs([
+        "📢 Broadcast Announcement (Students & Faculty)",
+        "🔔 Send Direct Student Notification",
+        "📋 Active Announcements & History",
+        "📜 Gradebook Marks Audit Trail"
+    ])
 
-        post_ann = st.form_submit_button("Post Official Notice", type="primary")
-        if post_ann:
-            if not a_title or not a_content:
-                st.error("Please enter both title and content.")
-            else:
-                create_system_announcement(a_title, a_content, a_prio, a_role, created_by=admin.get("full_name", "Administration"))
-                st.success("✅ Announcement broadcasted across user portals!")
-                st.rerun()
+    with tab_broadcast:
+        st.markdown("#### 📢 Broadcast Official Institutional Notice")
+        st.caption("Broadcast announcements appear prominently as banner alerts across the top of Student and Faculty dashboards.")
+        
+        with st.form("admin_broadcast_form"):
+            b_title = st.text_input("Notice Headline / Title", placeholder="e.g. Schedule for Mid-Semester Examinations 2026-27")
+            b_content = st.text_area("Detailed Announcement Content", placeholder="Enter the complete institutional circular or announcement text...", rows=4)
+            
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                b_prio = st.selectbox("Priority Level", ["Normal", "High", "Urgent"])
+            with c2:
+                b_role = st.selectbox("Target Audience", ["All", "Student", "Faculty"])
+            with c3:
+                b_cat = st.selectbox("Announcement Category", ["Academic", "Examination", "Attendance", "Fee & Ledger", "Administrative", "Emergency"])
 
-    st.markdown("#### 📋 Active University Announcements")
-    announcements = get_system_announcements("All")
-    if announcements:
-        for a in announcements:
-            with st.container(border=True):
-                st.markdown(f"**[{a['priority']} Priority] {a['title']}** (Target: {a['target_role']})")
-                st.caption(f"Posted by {a['created_by']} on {a['created_at']}")
-                st.write(a["content"])
-    else:
-        st.info("No active announcements.")
+            post_btn = st.form_submit_button("🚀 Broadcast Official Notice", type="primary", use_container_width=True)
+            if post_btn:
+                if not b_title.strip() or not b_content.strip():
+                    st.error("Please provide both headline and message content.")
+                else:
+                    create_system_announcement(
+                        f"[{b_cat}] {b_title.strip()}",
+                        b_content.strip(),
+                        b_prio,
+                        b_role,
+                        created_by=admin.get("full_name", "Academic Administration")
+                    )
+                    st.success(f"🎉 Official Notice successfully broadcasted to **{b_role}** portals!")
+                    st.rerun()
 
-    st.markdown("#### 📜 Faculty Assessment Marks Modification Audit Log")
-    st.caption("Tamper-proof record tracking all student mark adjustments, faculty evaluators, and timestamps.")
-    m_logs = get_marks_audit_logs(limit=50)
-    if m_logs:
-        st.dataframe(pd.DataFrame(m_logs), use_container_width=True, hide_index=True)
-    else:
-        st.info("No marks modifications logged yet.")
+    with tab_direct_stu:
+        st.markdown("#### 🔔 Dispatch Direct In-App Notifications to Students")
+        st.caption("Direct notifications appear inside the student's Notification Bell center with instant unread alert counters.")
+
+        target_mode = st.radio("Select Target Scope", ["All Registered Students", "Specific Section (A–J)", "Individual Student"], horizontal=True)
+
+        conn = get_connection()
+        if target_mode == "All Registered Students":
+            target_students = conn.execute("SELECT student_id, roll_number, full_name, email FROM students").fetchall()
+        elif target_mode == "Specific Section (A–J)":
+            sec_pick = st.selectbox("Choose Section", ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"], key="admin_notif_sec")
+            target_students = conn.execute("SELECT student_id, roll_number, full_name, email FROM students WHERE section = ?", (sec_pick,)).fetchall()
+        else:
+            all_s = conn.execute("SELECT student_id, roll_number, full_name, email, section FROM students ORDER BY roll_number").fetchall()
+            s_map = {f"{r['roll_number']} · {r['full_name']} (Sec {r['section']})": r for r in all_s}
+            s_chosen = st.selectbox("Select Student", list(s_map.keys()), key="admin_notif_single_s")
+            target_students = [s_map[s_chosen]] if s_chosen else []
+        conn.close()
+
+        st.info(f"🎯 **Target Recipient Count:** {len(target_students)} student(s)")
+
+        with st.form("admin_student_notif_form"):
+            notif_title = st.text_input("Notification Title", placeholder="e.g. Mandatory Document Verification / Remedial Tutorial")
+            notif_msg = st.text_area("Notification Message", placeholder="Enter specific instructions for the recipient(s)...", rows=3)
+            
+            send_stu_notif = st.form_submit_button("🚀 Send Notification", type="primary", use_container_width=True)
+            if send_stu_notif:
+                if not notif_title.strip() or not notif_msg.strip():
+                    st.error("Please enter both title and message.")
+                elif not target_students:
+                    st.warning("No students found in the selected target scope.")
+                else:
+                    s_ids = [s["student_id"] for s in target_students]
+                    sent_cnt = create_bulk_student_notifications(s_ids, notif_title.strip(), notif_msg.strip())
+                    st.success(f"🎉 Notification successfully delivered to {sent_cnt} student(s)!")
+
+    with tab_active_ann:
+        st.markdown("#### 📋 Active University Announcements & Management")
+        announcements = get_system_announcements("All")
+        if announcements:
+            for a in announcements:
+                with st.container(border=True):
+                    col_info, col_del = st.columns([5, 1])
+                    with col_info:
+                        prio_badge = "🔴 URGENT" if a["priority"] == "Urgent" else ("🟡 HIGH" if a["priority"] == "High" else "🔵 NORMAL")
+                        st.markdown(f"**{prio_badge} · {a['title']}** (Audience: `{a['target_role']}`)")
+                        st.caption(f"Posted by **{a['created_by']}** on {a['created_at']}")
+                        st.write(a["content"])
+                    with col_del:
+                        if st.button("🗑️ Delete", key=f"del_ann_{a['announcement_id']}", use_container_width=True):
+                            delete_system_announcement(a["announcement_id"])
+                            st.success("Announcement deleted.")
+                            st.rerun()
+        else:
+            st.info("No active announcements found.")
+
+    with tab_audit:
+        st.markdown("#### 📜 Faculty Assessment Marks Modification Audit Log")
+        st.caption("Tamper-proof record tracking all student mark adjustments, faculty evaluators, and timestamps.")
+        m_logs = get_marks_audit_logs(limit=50)
+        if m_logs:
+            st.dataframe(pd.DataFrame(m_logs), use_container_width=True, hide_index=True)
+        else:
+            st.info("No marks modifications logged yet.")
 
 
 # ==========================================================

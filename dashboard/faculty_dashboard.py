@@ -21,6 +21,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from auth import require_faculty
 from database import (
+    create_bulk_student_notifications,
     create_student_notification,
     get_connection,
     get_course_assessment_roster,
@@ -98,6 +99,7 @@ with st.sidebar:
         [
             "📝 Course Assessment (60/40 CIE)",
             "📋 Session Attendance",
+            "📢 Send Student Notifications",
             "🔍 Student Search & Summary",
             "🚨 At-Risk Student Detection",
             "📡 Send Predictions & Recommendations",
@@ -560,6 +562,121 @@ elif faculty_nav == "📋 Session Attendance":
 # =============================================================
 # TAB 3: STUDENT SEARCH & SUMMARY
 # =============================================================
+# =============================================================
+# TAB: SEND STUDENT NOTIFICATIONS (FACULTY ANNOUNCEMENTS)
+# =============================================================
+elif faculty_nav == "📢 Send Student Notifications":
+    st.subheader("📢 Send Class Announcements & In-App Notifications")
+    st.caption("Broadcast official class notices, quiz reminders, assignment schedules, and lab guidelines directly to student notification centers.")
+
+    faculty_sections = sorted(list(set(item["section"] for item in schedule))) if schedule else ["A"]
+    faculty_courses = sorted(list(set(f"{item['course_code']} - {item['course_name']}" for item in schedule))) if schedule else ["CS101 - Programming in C"]
+
+    col_target_type, col_cat = st.columns([2, 1])
+    with col_target_type:
+        f_scope = st.radio(
+            "Select Notification Target Scope",
+            [
+                "👥 Entire Assigned Section (All Students in Section)",
+                "👤 Specific Student in My Section",
+            ],
+            horizontal=True,
+        )
+    with col_cat:
+        notif_cat = st.selectbox(
+            "Notice Category",
+            ["Academic / Lecture", "Assignment Due", "Quiz / Test Alert", "Lab Guidelines", "Timetable Update", "Remedial / Mentoring"],
+        )
+
+    target_stu_records = []
+    if f_scope == "👥 Entire Assigned Section (All Students in Section)":
+        c_sec, c_crs = st.columns(2)
+        with c_sec:
+            sel_f_sec = st.selectbox("Select Target Section", faculty_sections, key="fac_notif_sec_picker")
+        with c_crs:
+            sel_f_crs = st.selectbox("Relevant Course", faculty_courses, key="fac_notif_crs_picker")
+
+        conn = get_connection()
+        target_stu_records = conn.execute(
+            """
+            SELECT s.student_id, s.roll_number, s.full_name, s.email, s.phone
+            FROM students s
+            JOIN semester_registrations sr ON sr.student_id = s.student_id
+            WHERE sr.section = ? AND sr.status = 'Registered'
+            ORDER BY s.roll_number ASC
+            """,
+            (sel_f_sec,)
+        ).fetchall()
+        conn.close()
+
+    else:
+        c_sec_ind, c_stu_ind = st.columns([1, 2])
+        with c_sec_ind:
+            sel_f_sec_ind = st.selectbox("Select Section", faculty_sections, key="fac_notif_sec_ind")
+        conn = get_connection()
+        sec_stus = conn.execute(
+            """
+            SELECT s.student_id, s.roll_number, s.full_name, s.email, s.phone
+            FROM students s
+            JOIN semester_registrations sr ON sr.student_id = s.student_id
+            WHERE sr.section = ? AND sr.status = 'Registered'
+            ORDER BY s.roll_number ASC
+            """,
+            (sel_f_sec_ind,)
+        ).fetchall()
+        conn.close()
+
+        if sec_stus:
+            s_opts = {f"{r['roll_number']} · {r['full_name']}": r for r in sec_stus}
+            with c_stu_ind:
+                chosen_s_label = st.selectbox("Select Recipient Student", list(s_opts.keys()))
+                target_stu_records = [s_opts[chosen_s_label]]
+
+    st.info(f"🎯 **Target Recipient Count:** {len(target_stu_records)} student(s)")
+
+    with st.form("faculty_notification_form"):
+        n_title = st.text_input("Notice Headline / Subject", placeholder="e.g. Practical Lab Manual Submission Deadline")
+        n_message = st.text_area(
+            "Notice Body / Detailed Instructions",
+            placeholder="Enter the detailed announcement instructions for students...",
+            rows=4
+        )
+        
+        c_opt1, c_opt2 = st.columns(2)
+        with c_opt1:
+            n_priority = st.selectbox("Priority Level", ["Normal", "High", "Urgent"])
+        with c_opt2:
+            send_email_copy = st.checkbox("Also Send Direct Email to Student(s)", value=False)
+
+        submit_notif_btn = st.form_submit_button("🚀 Send Notification Now", type="primary", use_container_width=True)
+        if submit_notif_btn:
+            if not n_title.strip() or not n_message.strip():
+                st.error("Please provide both a subject and message content.")
+            elif not target_stu_records:
+                st.warning("No recipient students found for the selected scope.")
+            else:
+                formatted_title = f"[{notif_cat}] {n_title.strip()} (From {faculty_name})"
+                s_ids = [r["student_id"] for r in target_stu_records]
+                
+                # Insert into database notifications
+                sent_cnt = create_bulk_student_notifications(s_ids, formatted_title, n_message.strip())
+
+                # Also send email if requested
+                emails_delivered = 0
+                if send_email_copy:
+                    for rec in target_stu_records:
+                        if rec.get("email"):
+                            e_res = send_email(
+                                to_email=rec["email"],
+                                subject=f"Academic Notice: {n_title.strip()}",
+                                body=f"Dear {rec['full_name']},\n\n{n_message.strip()}\n\n— {faculty_name} ({designation})\nDepartment of {dept}"
+                            )
+                            if e_res.get("success"):
+                                emails_delivered += 1
+
+                st.success(f"🎉 **Notification Dispatched!** Delivered to {sent_cnt} student in-app notification centers" + (f" and {emails_delivered} emails sent." if send_email_copy else "."))
+
+
 elif faculty_nav == "🔍 Student Search & Summary":
     st.subheader("🔍 Institutional Student Lookup & Academic Profile")
     st.caption("Search across the 500 registered first-year students across Sections A through J.")
