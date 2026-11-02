@@ -171,6 +171,7 @@ menu = st.sidebar.radio(
         "Faculty Registration Approvals",
         "Faculty Teaching Requests",
         "Train ML Models",
+        "🔬 View Trained ML Dataset (4,000 Records)",
         "Recommendations & Predictions Dispatch (Email & WhatsApp)",
         "Notifications & Announcements",
         "Audit Trail & Announcements",
@@ -235,7 +236,7 @@ if menu == "Dashboard":
         use_container_width=True
     )
 
-elif menu == "Train ML Models":
+elif menu in ("Train ML Models", "🔬 View Trained ML Dataset (4,000 Records)"): 
 
     st.subheader("Autonomous Machine Learning & Multi-Dataset Training Center")
     st.markdown(
@@ -738,10 +739,20 @@ elif menu == "Train ML Models":
     # TAB 4: INSTITUTIONAL DATASET EXPLORER
     # =========================================================
     with tab_data:
-        st.markdown("#### 🔬 Institutional Dataset Explorer (4,000 Records)")
-        st.caption("Inspect and audit course assessment and attendance records across all 10 sections (Sections A to J).")
+        st.markdown("#### 🔬 Institutional Trained Dataset Explorer (All 4,000 Records)")
+        st.caption("Complete, transparent repository of all 4,000 student assessment and biometric attendance records used to train and validate the Machine Learning models.")
 
-        if not training_frame.empty:
+        if training_frame.empty:
+            st.info("No training data found in database. Run dataset seed in Admin.")
+        else:
+            # Top Search Bar
+            search_kw = st.text_input(
+                "🔍 Instant Search by Student Name or Roll Number",
+                placeholder="e.g. 26STU0042, Ananya, MA101, Section A...",
+                key="ds_search_kw"
+            )
+
+            # Filter Controls Row
             f_sec, f_course, f_risk, f_perf = st.columns(4)
             with f_sec:
                 sec_choices = ["All Sections"] + (sorted(list(training_frame["section"].dropna().unique())) if "section" in training_frame.columns else [])
@@ -757,6 +768,20 @@ elif menu == "Train ML Models":
                 sel_perf = st.selectbox("Filter by Performance", perf_choices, key="ds_perf")
 
             filtered_df = training_frame.copy()
+
+            if search_kw.strip():
+                kw = search_kw.strip().lower()
+                cond = False
+                if "roll_number" in filtered_df.columns:
+                    cond = cond | filtered_df["roll_number"].astype(str).str.lower().str.contains(kw)
+                if "student_name" in filtered_df.columns:
+                    cond = cond | filtered_df["student_name"].astype(str).str.lower().str.contains(kw)
+                if "course_code" in filtered_df.columns:
+                    cond = cond | filtered_df["course_code"].astype(str).str.lower().str.contains(kw)
+                if "section" in filtered_df.columns:
+                    cond = cond | filtered_df["section"].astype(str).str.lower().str.contains(kw)
+                filtered_df = filtered_df[cond]
+
             if sel_sec != "All Sections" and "section" in filtered_df.columns:
                 filtered_df = filtered_df[filtered_df["section"] == sel_sec]
             if sel_course != "All Courses" and "course_code" in filtered_df.columns:
@@ -769,7 +794,7 @@ elif menu == "Train ML Models":
             # Summary metrics of filtered view
             m1, m2, m3, m4 = st.columns(4)
             with m1:
-                st.metric("Records Matching", f"{len(filtered_df):,}")
+                st.metric("Records in View", f"{len(filtered_df):,} / {len(training_frame):,}")
             with m2:
                 avg_att_f = filtered_df["course_attendance"].mean() if not filtered_df.empty else 0.0
                 st.metric("Mean Attendance", f"{avg_att_f:.1f}%")
@@ -780,15 +805,57 @@ elif menu == "Train ML Models":
                 avg_tot_f = filtered_df["total_score"].mean() if not filtered_df.empty else 0.0
                 st.metric("Mean Total Score", f"{avg_tot_f:.1f} / 100")
 
-            st.dataframe(filtered_df, use_container_width=True, hide_index=True)
-            csv_data = filtered_df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="📥 Export Filtered Dataset (CSV)",
-                data=csv_data,
-                file_name="institutional_dataset_export.csv",
-                mime="text/csv",
-                key="ds_csv_download",
-            )
+            # Clean ordered columns for institutional presentation
+            pref_cols = [
+                "roll_number", "student_name", "section", "course_code", "course_name",
+                "course_attendance", "mid_exam_marks", "quiz_marks", "assignment_marks",
+                "viva_marks", "internal_total", "external_marks", "total_score",
+                "performance_label", "risk_label"
+            ]
+            active_cols = [c for c in pref_cols if c in filtered_df.columns]
+            rename_map = {
+                "roll_number": "Roll No",
+                "student_name": "Student Name",
+                "section": "Sec",
+                "course_code": "Course Code",
+                "course_name": "Course Title",
+                "course_attendance": "Attendance %",
+                "mid_exam_marks": "Mid /30",
+                "quiz_marks": "Quiz /10",
+                "assignment_marks": "Assn /10",
+                "viva_marks": "Viva /10",
+                "internal_total": "Internal /60",
+                "external_marks": "SEE /40",
+                "total_score": "Total /100",
+                "performance_label": "Performance",
+                "risk_label": "Risk Tier"
+            }
+
+            render_df = filtered_df[active_cols].rename(columns=rename_map)
+            st.dataframe(render_df, use_container_width=True, hide_index=True)
+
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                st.download_button(
+                    label="📥 Export Filtered View (CSV)",
+                    data=render_df.to_csv(index=False).encode("utf-8"),
+                    file_name="trained_data_filtered.csv",
+                    mime="text/csv",
+                    key="ds_csv_download_filtered",
+                    use_container_width=True
+                )
+            with dl_col2:
+                # Full 4,000 records export with human-readable headers
+                full_export_df = training_frame[active_cols].rename(columns=rename_map) if not training_frame.empty else training_frame
+                st.download_button(
+                    label=f"📥 Download Complete 4,000-Record Trained Dataset (CSV)",
+                    data=full_export_df.to_csv(index=False).encode("utf-8"),
+                    file_name="complete_4000_records_trained_dataset.csv",
+                    mime="text/csv",
+                    key="ds_csv_download_all",
+                    use_container_width=True,
+                    type="primary"
+                )
 
 
 elif menu == "Student Approvals":

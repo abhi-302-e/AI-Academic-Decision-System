@@ -1856,7 +1856,8 @@ def get_course_model_training_data():
     connection = get_connection()
     rows = connection.execute(
         """
-        SELECT ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
+        SELECT s.roll_number, s.full_name AS student_name,
+               ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
                ca.viva_marks, ca.external_marks,
                ROUND(ca.assignment_marks + ca.quiz_marks + ca.mid_exam_marks
                      + ca.viva_marks, 2) AS internal_total,
@@ -1868,6 +1869,7 @@ def get_course_model_training_data():
                c.course_name
         FROM course_assessments ca
         JOIN semester_registrations sr ON sr.registration_id = ca.registration_id
+        JOIN students s ON s.student_id = sr.student_id
         JOIN courses c ON c.course_id = ca.course_id
         LEFT JOIN (
             SELECT ar.student_id, t.course_id, t.section,
