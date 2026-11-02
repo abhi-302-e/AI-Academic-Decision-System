@@ -71,7 +71,7 @@ if role == "Student":
 elif role == "Faculty":
     pages = [
         st.Page("dashboard/faculty_dashboard.py", title="Faculty Dashboard", icon="👨‍🏫", default=True),
-        st.Page("dashboard/ai_hub.py", title="AI Academic Hub", icon="✨"),
+        st.Page("dashboard/faculty_ai_hub.py", title="Faculty AI Academic Hub", icon="🧠"),
     ]
 elif role == "Admin":
     pages = {

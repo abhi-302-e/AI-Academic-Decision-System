@@ -219,6 +219,24 @@ with st.sidebar:
     st.caption(f"Enrollment: `{enrollment_number}`")
     st.caption(f"Dept: {department}")
     st.divider()
+    st.markdown("### 🧭 Student Navigation")
+    student_nav = st.radio(
+        "Student Navigation",
+        [
+            "🏛️ Portal Overview",
+            "👤 Personal & Parent Details",
+            "💳 Fee Payment & Ledger",
+            "📚 Academic Curriculum",
+            "📊 Continuous Internal Evaluation (CIE /60)",
+            "📅 Timetable & Attendance",
+            "🧠 AI Decision Engine & XAI",
+            "🎯 Targeted Recommendations & Alerts",
+            f"🔔 Notifications ({unread_count})",
+        ],
+        index=0,
+        label_visibility="collapsed"
+    )
+    st.divider()
     st.markdown("#### 📧 Outbound Real Services")
     st.caption(f"Admin: `{get_configured_admin_email()}`")
     st.caption(f"Personal Phone: `{student_phone}`")
@@ -399,32 +417,13 @@ with kpi_cols[4]:
 # -------------------------------------------------------------
 # MAIN DASHBOARD TABS
 # -------------------------------------------------------------
-(
-    overview_tab,
-    profile_tab,
-    fees_tab,
-    courses_tab,
-    gradebook_tab,
-    timetable_tab,
-    ai_engine_tab,
-    rec_tab,
-    notif_tab,
-) = st.tabs([
-    "🏛️ Portal Overview",
-    "👤 Personal & Parent Details",
-    "💳 Fee Payment & Ledger",
-    "📚 Academic Curriculum",
-    "📊 Continuous Internal Evaluation (CIE /60)",
-    "📅 Timetable & Attendance",
-    "🧠 AI Decision Engine & XAI",
-    "🎯 Targeted Recommendations & Alerts",
-    f"🔔 Notifications ({unread_count})",
-])
+# Student Portal Navigation View (Controlled via Sidebar)
+# Active view selected from sidebar: student_nav
 
 # =============================================================
 # TAB 1: PORTAL OVERVIEW
 # =============================================================
-with overview_tab:
+if student_nav == "🏛️ Portal Overview":
     col_profile, col_highlights = st.columns([1.1, 1])
 
     with col_profile:
@@ -501,7 +500,7 @@ with overview_tab:
 # =============================================================
 # TAB 2: PERSONAL & PARENT DETAILS
 # =============================================================
-with profile_tab:
+elif student_nav == "👤 Personal & Parent Details":
     st.subheader("Student Personal & Parent Demographic Profile")
     st.caption("Official university records used for academic records, statutory verification, and notification dispatches.")
 
@@ -569,7 +568,7 @@ with profile_tab:
 # =============================================================
 # TAB 3: FEE PAYMENT & LEDGER (STRUCTURE, SCHEDULE, RECEIPTS, STATEMENT, REFUND, FINES)
 # =============================================================
-with fees_tab:
+elif student_nav == "💳 Fee Payment & Ledger":
     st.subheader("Academic Fee Management & Institutional Financial Ledger")
     st.caption("Official university accounting system covering accredited fee structures, payment schedules, receipts, account statements, refund claims, and penalty ledgers.")
 
@@ -950,7 +949,7 @@ with fees_tab:
 # =============================================================
 # TAB 4: ACADEMIC CURRICULUM
 # =============================================================
-with courses_tab:
+elif student_nav == "📚 Academic Curriculum":
     st.subheader(f"Academic Curriculum & Course Enrollment · Year {current_year}, Semester {current_semester}")
     st.caption("Official accredited course structure for Batch 2026–27 (Total 20 Credits across 8 Courses).")
 
@@ -983,7 +982,7 @@ with courses_tab:
 # =============================================================
 # TAB 5: CIE & EXTERNAL GRADEBOOK (60/40) & GRADE CARD
 # =============================================================
-with gradebook_tab:
+elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
     st.subheader("Continuous Internal Evaluation (CIE /60) Dossier")
     st.markdown(
         """
@@ -1104,7 +1103,7 @@ with gradebook_tab:
 # =============================================================
 # TAB 6: TIMETABLE & ATTENDANCE
 # =============================================================
-with timetable_tab:
+elif student_nav == "📅 Timetable & Attendance":
     st.subheader(f"Weekly Class Schedule · Section {assigned_section}")
     st.caption("50-minute teaching slots conducted Monday through Saturday as scheduled by Academic Administration.")
 
@@ -1125,7 +1124,7 @@ with timetable_tab:
 # =============================================================
 # TAB 7: AI DECISION ENGINE & EXPLAINABLE AI (XAI)
 # =============================================================
-with ai_engine_tab:
+elif student_nav == "🧠 AI Decision Engine & XAI":
     st.subheader("Autonomous AI Academic Decision Engine")
     st.caption("Dual Random Forest Machine Learning intelligence synthesizing educational benchmarks.")
 
@@ -1248,7 +1247,7 @@ with ai_engine_tab:
 # =============================================================
 # TAB 8: TARGETED RECOMMENDATIONS & REAL OUTBOUND SERVICES
 # =============================================================
-with rec_tab:
+elif student_nav == "🎯 Targeted Recommendations & Alerts":
     st.subheader("AI-Generated Recommendations & Action Plans")
     st.caption("Personalized course-level intervention roadmaps and study guidance formulated by institutional AI models.")
 
@@ -1297,7 +1296,7 @@ with rec_tab:
 # =============================================================
 # TAB 9: NOTIFICATIONS & UNIVERSITY NOTICES
 # =============================================================
-with notif_tab:
+elif student_nav.startswith("🔔 Notifications"):
     st.subheader(f"Academic Notifications & Official Notices ({unread_count} Unread)")
 
     if unread_count > 0:

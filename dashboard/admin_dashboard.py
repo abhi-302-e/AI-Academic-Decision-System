@@ -151,7 +151,8 @@ st.divider()
 # MENU
 # ==========================================================
 
-menu = st.sidebar.selectbox(
+st.sidebar.markdown("### 🛡️ Admin Menu")
+menu = st.sidebar.radio(
     "Select Option",
     [
         "Dashboard",

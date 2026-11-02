@@ -86,6 +86,20 @@ with st.sidebar:
     st.caption(f"ID: `{employee_id}`")
     st.caption(f"{designation} · {dept}")
     st.divider()
+    st.markdown("### 🧭 Faculty Navigation")
+    faculty_nav = st.radio(
+        "Faculty Navigation",
+        [
+            "📝 Course Assessment (60/40 CIE)",
+            "📋 Session Attendance",
+            "🔍 Student Search & Summary",
+            "🚨 At-Risk Student Detection",
+            "📊 Section Analytics & Trends",
+        ],
+        index=0,
+        label_visibility="collapsed"
+    )
+    st.divider()
     if st.button("🚪 Logout", key="faculty_sidebar_logout", use_container_width=True, type="primary"):
         st.session_state.clear()
         st.rerun()
@@ -103,19 +117,13 @@ if schedule:
 else:
     st.warning("You do not have any approved timetable slots assigned yet. Course and section assignments are managed by Academic Administration.")
 
-# Tabs: Faculty only submits student attendance and marks
-tab_assess, tab_att, tab_search, tab_risk, tab_analytics = st.tabs([
-    "📝 Course Assessment (60/40 CIE)",
-    "📋 Session Attendance",
-    "🔍 Student Search & Summary",
-    "🚨 At-Risk Student Detection",
-    "📊 Section Analytics & Trends",
-])
+# Faculty Workspace View Selector (Controlled via Sidebar)
+# Active view selected from sidebar: faculty_nav
 
 # =============================================================
 # TAB 1: COURSE ASSESSMENT (60/40 CIE)
 # =============================================================
-with tab_assess:
+if faculty_nav == "📝 Course Assessment (60/40 CIE)":
     st.subheader("Continuous Internal Evaluation (CIE) & External Marks Entry")
     st.markdown(
         """
@@ -468,7 +476,7 @@ with tab_assess:
 # =============================================================
 # TAB 2: SESSION ATTENDANCE
 # =============================================================
-with tab_att:
+elif faculty_nav == "📋 Session Attendance":
     st.subheader("Classroom Session Attendance Register")
     st.caption("Mark attendance for the 50 students in your assigned section. Once submitted, session attendance is locked to maintain audit integrity.")
 
@@ -545,7 +553,7 @@ with tab_att:
 # =============================================================
 # TAB 3: STUDENT SEARCH & SUMMARY
 # =============================================================
-with tab_search:
+elif faculty_nav == "🔍 Student Search & Summary":
     st.subheader("🔍 Institutional Student Lookup & Academic Profile")
     st.caption("Search across the 500 registered first-year students across Sections A through J.")
 
@@ -614,7 +622,7 @@ with tab_search:
 # =============================================================
 # TAB 4: AT-RISK STUDENT DETECTION
 # =============================================================
-with tab_risk:
+elif faculty_nav == "🚨 At-Risk Student Detection":
     st.subheader("🚨 Early Warning & At-Risk Student Detection")
     st.markdown(
         """
@@ -721,7 +729,7 @@ with tab_risk:
 # =============================================================
 # TAB 5: SECTION ANALYTICS & TRENDS
 # =============================================================
-with tab_analytics:
+elif faculty_nav == "📊 Section Analytics & Trends":
     st.subheader("📊 Section Performance Analytics & Distribution")
     st.caption("Aggregated analytics across Section A through J assessments and attendance.")
 
