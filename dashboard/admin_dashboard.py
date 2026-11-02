@@ -2109,6 +2109,8 @@ elif menu == "Executive Institutional Cockpit":
     st.subheader("🌐 University Executive Leadership Cockpit & Accreditation Radar")
     st.caption("Strategic institutional governance overview for Vice-Chancellor, Dean of Academics, and University Registrar.")
 
+    ensure_course_feedback_table()
+    ensure_enterprise_erp_tables()
     conn = get_connection()
     dept_stats = conn.execute("""
         SELECT department,

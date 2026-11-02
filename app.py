@@ -14,6 +14,9 @@ from database import (
     upgrade_student_personal_and_payment_system,
     upgrade_student_emails_to_gmail,
     ensure_default_admin,
+    ensure_course_feedback_table,
+    ensure_enterprise_erp_tables,
+    ensure_mentoring_notes_table,
     get_connection,
 )
 
@@ -40,6 +43,9 @@ def initialize_app_database(schema_revision):
     upgrade_student_personal_and_payment_system()
     upgrade_student_emails_to_gmail()
     ensure_default_admin()
+    ensure_course_feedback_table()
+    ensure_enterprise_erp_tables()
+    ensure_mentoring_notes_table()
     try:
         from advisory_dispatch_service import start_scheduler_service
         start_scheduler_service()
@@ -59,7 +65,7 @@ connection.close()
 if not has_student_table:
     initialize_app_database.clear()
 
-initialize_app_database("credentials-update-v2")
+initialize_app_database("enterprise-erp-v1")
 
 role = st.session_state.get("role")
 
