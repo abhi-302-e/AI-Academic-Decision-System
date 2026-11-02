@@ -38,7 +38,13 @@ from database import (
 from email_service import (
     send_email,
     send_attendance_shortage_email,
+    send_student_recommendations_email,
     get_configured_admin_email,
+    is_email_service_active,
+)
+from advisory_dispatch_service import (
+    dispatch_student_recommendations_and_predictions,
+    get_single_student_advisory_preview,
 )
 from prediction import predict_registered_course, are_course_models_trained
 from recommendation_engine import generate_course_level_recommendations
@@ -94,6 +100,7 @@ with st.sidebar:
             "📋 Session Attendance",
             "🔍 Student Search & Summary",
             "🚨 At-Risk Student Detection",
+            "📡 Send Predictions & Recommendations",
             "📊 Section Analytics & Trends",
         ],
         index=0,
@@ -696,8 +703,47 @@ elif faculty_nav == "🚨 At-Risk Student Detection":
         st.markdown("#### 🚨 Statutory Attendance Shortage Alert (< 75%) Dispatch Center")
         st.caption(f"Send live Email and WhatsApp notifications to students and parents using admin sender: `{get_configured_admin_email()}`")
 
+        st.markdown("#### 📡 Dispatch AI Predictions & Recommendations Email")
+        st.caption("Deliver personalized AI academic predictions, course-level improvement advice, and remedial action plans directly to student inboxes.")
+        
+        col_advis1, col_advis2 = st.columns([2, 1])
+        with col_advis1:
+            fac_note_risk = st.text_input(
+                "Personal Faculty Mentoring Note (Optional)",
+                value="Please review your Continuous Internal Evaluation (CIE) standing and schedule a remedial mentoring session with me during office hours.",
+                key="fac_risk_note"
+            )
+        with col_advis2:
+            send_wa_risk = st.checkbox("Also Send WhatsApp", value=False, key="fac_risk_wa")
+
+        if st.button(f"🚀 Dispatch AI Predictions & Recommendations to All {len(risk_students)} Flagged Students", type="primary", use_container_width=True):
+            sent_emails = 0
+            sent_wa = 0
+            prog = st.progress(0.0)
+            status_box = st.empty()
+            
+            for idx, r in enumerate(risk_students, 1):
+                status_box.caption(f"Processing student {idx}/{len(risk_students)}: {r['roll_number']} ({r['full_name']})")
+                prog.progress(idx / len(risk_students))
+                disp_res = dispatch_student_recommendations_and_predictions(
+                    student_id=r["student_id"],
+                    send_email_flag=True,
+                    send_whatsapp_flag=send_wa_risk,
+                    custom_note=fac_note_risk.strip(),
+                    is_scheduled_daily=False,
+                )
+                if disp_res.get("success"):
+                    sent_emails += disp_res.get("emails_sent", 0)
+                    sent_wa += disp_res.get("sms_sent", 0)
+
+            prog.progress(1.0)
+            status_box.empty()
+            st.success(f"🎉 Successfully dispatched AI Predictions & Recommendations! {sent_emails} Emails delivered (and {sent_wa} WhatsApp messages).")
+
+        st.divider()
+
         shortage_students = [r for r in risk_students if float(dict(r).get("attendance_percentage") or 0) < 75.0]
-        if st.button(f"🚀 Dispatch Statutory Shortage Alerts to {len(shortage_students)} Students & Parents", type="primary", use_container_width=True):
+        if st.button(f"🚀 Dispatch Statutory Shortage Alerts to {len(shortage_students)} Students & Parents", type="secondary", use_container_width=True):
             email_sent = 0
             sms_sent = 0
             for r in shortage_students:
@@ -729,6 +775,282 @@ elif faculty_nav == "🚨 At-Risk Student Detection":
 # =============================================================
 # TAB 5: SECTION ANALYTICS & TRENDS
 # =============================================================
+# =============================================================
+# TAB: SEND PREDICTIONS & RECOMMENDATIONS (FACULTY DISPATCH)
+# =============================================================
+elif faculty_nav == "📡 Send Predictions & Recommendations":
+    st.subheader("📡 Dispatch Student AI Predictions & Recommendations")
+    st.caption(
+        f"Empower students in your assigned sections with automated AI performance forecasts, "
+        f"continuous internal evaluation (CIE /60) diagnostics, and personalized course recommendations."
+    )
+
+    admin_sender = get_configured_admin_email()
+    mail_status = is_email_service_active()
+
+    with st.container(border=True):
+        scol1, scol2, scol3 = st.columns(3)
+        with scol1:
+            st.markdown("**🏛️ Institutional Sender**")
+            st.code(admin_sender)
+        with scol2:
+            st.markdown("**📧 Mail Service**")
+            if mail_status:
+                st.success("● Connected / Active")
+            else:
+                st.warning("○ Password Required")
+        with scol3:
+            st.markdown("**👨‍🏫 Instructor Authority**")
+            st.info(f"{faculty_name} ({employee_id})")
+
+    st.divider()
+
+    # Scope selection: Section-level vs Individual Student
+    scope_type = st.radio(
+        "Select Dispatch Target",
+        [
+            "👤 Single Student in Assigned Section",
+            "👥 Entire Assigned Section (Batch)",
+            "⚠️ Flagged At-Risk Students in Assigned Section",
+        ],
+        horizontal=True,
+    )
+
+    # Determine faculty assigned sections from timetable
+    faculty_sections = sorted(list(set(item["section"] for item in schedule))) if schedule else ["A"]
+
+    if scope_type == "👤 Single Student in Assigned Section":
+        col_sec_pick, col_stu_pick = st.columns([1, 2])
+        with col_sec_pick:
+            sel_sec = st.selectbox("Select Section", faculty_sections, key="fac_disp_single_sec")
+
+        # Fetch students for that section
+        conn = get_connection()
+        sec_students = conn.execute(
+            """
+            SELECT s.student_id, s.roll_number, s.full_name, s.email, s.phone,
+                   s.attendance_percentage, s.internal_marks
+            FROM students s
+            JOIN semester_registrations sr ON sr.student_id = s.student_id
+            WHERE sr.section = ? AND sr.status = 'Registered'
+            ORDER BY s.roll_number ASC
+            """,
+            (sel_sec,)
+        ).fetchall()
+        conn.close()
+
+        if not sec_students:
+            st.warning(f"No registered students found in Section {sel_sec}.")
+        else:
+            student_map = {
+                f"{r['roll_number']} · {r['full_name']} (CIE: {float(r['internal_marks'] or 0):.1f}/60 | Att: {float(r['attendance_percentage'] or 0):.1f}%)": r
+                for r in sec_students
+            }
+            with col_stu_pick:
+                chosen_label = st.selectbox("Select Student", list(student_map.keys()))
+                chosen_student = student_map[chosen_label]
+
+            # Fetch AI Advisory Preview
+            stu_id = chosen_student["student_id"]
+            preview_data = get_single_student_advisory_preview(stu_id)
+
+            if preview_data:
+                st.markdown("##### 🔍 AI Evaluation & Course Advisory Preview")
+                with st.container(border=True):
+                    p1, p2, p3, p4 = st.columns(4)
+                    p1.metric("Predicted Performance", preview_data.get("predicted_perf", "N/A"))
+                    risk = preview_data.get("risk_level", "Low")
+                    p2.metric(
+                        "Risk Classification",
+                        risk,
+                        delta="Action Required" if risk in ("High", "Medium") else "On Track",
+                        delta_color="inverse" if risk in ("High", "Medium") else "normal"
+                    )
+                    p3.metric("Continuous Internal CIE", f"{preview_data.get('cie_marks', 0):.1f} / 60")
+                    p4.metric("Attendance Regularity", f"{preview_data.get('attendance', 0):.1f}%")
+
+                    st.markdown("**🧠 Explainable AI Diagnostic Summary:**")
+                    st.info(preview_data.get("xai_summary", "Diagnostic evaluation active."))
+
+                    st.markdown("**🎯 Personalized AI Recommendations to be Included:**")
+                    for r_item in preview_data.get("recommendations", []):
+                        st.markdown(f"- 📌 {r_item}")
+
+                st.markdown("##### ✉️ Instructor Message & Dispatch Channels")
+                col_note, col_ch = st.columns([2.5, 1])
+                with col_note:
+                    instructor_note = st.text_area(
+                        "Custom Faculty Mentoring Advice (Appended to Email)",
+                        value=f"Dear {chosen_student['full_name']}, please continue following your continuous assessment study plan. For any doubts in course concepts or problem-solving, please meet me during tutorial hours.",
+                        rows=3,
+                        key="fac_custom_note"
+                    )
+                with col_ch:
+                    st.markdown("**Delivery Options**")
+                    send_mail = st.checkbox("📧 Send Email", value=True, key="fac_single_mail_chk")
+                    send_wa = st.checkbox("💬 Send WhatsApp", value=False, key="fac_single_wa_chk")
+                    st.caption(f"Recipient: `{chosen_student.get('email')}`")
+
+                if st.button("🚀 Send AI Predictions & Recommendations Email Now", type="primary", use_container_width=True):
+                    with st.spinner(f"Dispatching AI Advisory email to {chosen_student['full_name']}..."):
+                        disp_res = dispatch_student_recommendations_and_predictions(
+                            student_id=stu_id,
+                            send_email_flag=send_mail,
+                            send_whatsapp_flag=send_wa,
+                            custom_note=instructor_note.strip(),
+                            is_scheduled_daily=False,
+                        )
+                    if disp_res.get("success"):
+                        st.success(f"🎉 **Email Successfully Dispatched to {chosen_student['full_name']}!** ({chosen_student.get('email')})")
+                        if disp_res.get("logs"):
+                            st.dataframe(pd.DataFrame(disp_res.get("logs")), use_container_width=True, hide_index=True)
+                    else:
+                        st.error(f"❌ Dispatch error: {disp_res.get('message')}")
+
+    elif scope_type == "👥 Entire Assigned Section (Batch)":
+        col_b_sec, col_b_ch = st.columns([1, 1])
+        with col_b_sec:
+            target_batch_sec = st.selectbox("Select Target Section", faculty_sections, key="fac_batch_sec")
+        with col_b_ch:
+            st.markdown("**Delivery Channels**")
+            b_send_email = st.checkbox("📧 Deliver via Email", value=True, key="fac_batch_email_cb")
+            b_send_wa = st.checkbox("💬 Deliver via WhatsApp", value=False, key="fac_batch_wa_cb")
+
+        # Student count in section
+        conn = get_connection()
+        sec_count = conn.execute(
+            """
+            SELECT COUNT(DISTINCT s.student_id) as count
+            FROM students s
+            JOIN semester_registrations sr ON sr.student_id = s.student_id
+            WHERE sr.section = ? AND sr.status = 'Registered'
+            """,
+            (target_batch_sec,)
+        ).fetchone()["count"]
+        conn.close()
+
+        st.info(f"🎯 **Target Scope:** Ready to batch-dispatch AI predictions and course recommendations to all **{sec_count}** students in Section {target_batch_sec}.")
+
+        b_fac_note = st.text_area(
+            "Course Instructor Note for Section",
+            value=f"Academic update from your course instructor: Please review your continuous internal evaluation trajectory and recommended study interventions.",
+            rows=2,
+            key="fac_batch_note"
+        )
+
+        if st.button(f"🚀 Batch Dispatch Recommendations & Predictions to Section {target_batch_sec}", type="primary", use_container_width=True):
+            if not b_send_email and not b_send_wa:
+                st.error("Please select at least one delivery channel (Email or WhatsApp).")
+            elif sec_count == 0:
+                st.warning("No registered students found in this section.")
+            else:
+                progress_bar = st.progress(0.0)
+                status_text = st.empty()
+
+                def update_progress(curr, total, msg):
+                    frac = curr / total if total > 0 else 1.0
+                    progress_bar.progress(frac)
+                    status_text.caption(f"Processing ({curr}/{total}): {msg}")
+
+                with st.spinner("Generating AI evaluations and dispatching emails to students..."):
+                    res = dispatch_student_recommendations_and_predictions(
+                        section=target_batch_sec,
+                        student_id=None,
+                        send_email_flag=b_send_email,
+                        send_whatsapp_flag=b_send_wa,
+                        custom_note=b_fac_note.strip(),
+                        progress_callback=update_progress,
+                        is_scheduled_daily=False,
+                    )
+
+                progress_bar.progress(1.0)
+                status_text.empty()
+
+                if res.get("success"):
+                    st.success(f"🎉 **Batch Dispatch Completed!** {res.get('message')}")
+                    r1, r2 = st.columns(2)
+                    r1.metric("Emails Delivered", res.get("emails_sent", 0))
+                    r2.metric("WhatsApp Messages Delivered", res.get("whatsapp_sent", res.get("sms_sent", 0)))
+                    if res.get("logs"):
+                        with st.expander("View Dispatch Audit Logs", expanded=False):
+                            st.dataframe(pd.DataFrame(res.get("logs")), use_container_width=True, hide_index=True)
+                else:
+                    st.error(f"❌ Dispatch failed: {res.get('message')}")
+
+    elif scope_type == "⚠️ Flagged At-Risk Students in Assigned Section":
+        col_r_sec, col_r_opts = st.columns([1, 1])
+        with col_r_sec:
+            risk_target_sec = st.selectbox("Select Target Section", faculty_sections, key="fac_risk_target_sec")
+        with col_r_opts:
+            r_mail = st.checkbox("📧 Send Email", value=True, key="fac_r_mail")
+            r_wa = st.checkbox("💬 Send WhatsApp", value=False, key="fac_r_wa")
+
+        conn = get_connection()
+        sec_risk_students = conn.execute(
+            """
+            SELECT s.student_id, s.roll_number, s.full_name, s.email, s.phone,
+                   s.attendance_percentage, s.internal_marks
+            FROM students s
+            JOIN semester_registrations sr ON sr.student_id = s.student_id
+            WHERE sr.section = ? AND sr.status = 'Registered'
+              AND (s.attendance_percentage < 75.0 OR s.internal_marks < 24.0)
+            ORDER BY s.roll_number ASC
+            """,
+            (risk_target_sec,)
+        ).fetchall()
+        conn.close()
+
+        if not sec_risk_students:
+            st.success(f"🎉 No students in Section {risk_target_sec} are currently flagged for CIE deficits or attendance shortages.")
+        else:
+            st.warning(f"⚠️ **{len(sec_risk_students)}** students in Section {risk_target_sec} require early intervention (CIE < 24/60 or Attendance < 75%).")
+            st.dataframe(
+                pd.DataFrame([
+                    {
+                        "Roll Number": r["roll_number"],
+                        "Name": r["full_name"],
+                        "Email": r["email"],
+                        "Internal CIE (/60)": f"{float(r['internal_marks'] or 0):.1f}",
+                        "Attendance %": f"{float(r['attendance_percentage'] or 0):.1f}%",
+                    }
+                    for r in sec_risk_students
+                ]),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            risk_note = st.text_area(
+                "Remedial Advice Note for Flagged Students",
+                value="Urgent Academic Advisory: Your current continuous internal marks and/or attendance are below passing criteria. Please review the attached AI recommendations and attend mandatory tutorial remediation.",
+                rows=2,
+                key="fac_risk_area_note"
+            )
+
+            if st.button(f"🚀 Send Remedial Predictions & Recommendations to Flagged Students ({len(sec_risk_students)})", type="primary", use_container_width=True):
+                prog_bar = st.progress(0.0)
+                stat_text = st.empty()
+                r_emails_sent = 0
+                r_wa_sent = 0
+
+                for idx, r in enumerate(sec_risk_students, 1):
+                    stat_text.caption(f"Sending ({idx}/{len(sec_risk_students)}): {r['roll_number']} ({r['full_name']})")
+                    prog_bar.progress(idx / len(sec_risk_students))
+                    r_res = dispatch_student_recommendations_and_predictions(
+                        student_id=r["student_id"],
+                        send_email_flag=r_mail,
+                        send_whatsapp_flag=r_wa,
+                        custom_note=risk_note.strip(),
+                        is_scheduled_daily=False,
+                    )
+                    if r_res.get("success"):
+                        r_emails_sent += r_res.get("emails_sent", 0)
+                        r_wa_sent += r_res.get("sms_sent", 0)
+
+                prog_bar.progress(1.0)
+                stat_text.empty()
+                st.success(f"🎉 Dispatched remedial advisories to {r_emails_sent} students in Section {risk_target_sec}!")
+
+
 elif faculty_nav == "📊 Section Analytics & Trends":
     st.subheader("📊 Section Performance Analytics & Distribution")
     st.caption("Aggregated analytics across Section A through J assessments and attendance.")

@@ -23,7 +23,9 @@ from database import (
     get_connection,
     get_faculty_timetable,
     get_course_assessment_roster,
+    get_student_by_roll,
 )
+from advisory_dispatch_service import dispatch_student_recommendations_and_predictions
 
 require_faculty()
 faculty = dict(st.session_state.user_data or {})
@@ -231,8 +233,22 @@ elif selected_ai_tool == "🚨 Cohort At-Risk Intervention":
                     4. **Automated Institutional Advisory Notification:** Dispatch SMS/Email alert to student and academic mentor.
                     """
                 )
-                if st.button("🚀 Dispatch Targeted Mentoring Advisories to All Identified Students", type="primary"):
-                    st.success(f"Targeted remedial advisories queued for {len(at_risk_list)} students in Section {chosen_slot['section']}.")
+                if st.button("🚀 Dispatch AI Predictions & Course Recommendations Email to Flagged Students", type="primary", use_container_width=True):
+                    sent_emails = 0
+                    with st.spinner(f"Dispatching AI recommendations and prediction advisories to {len(at_risk_list)} students..."):
+                        for item in at_risk_list:
+                            s_rec = get_student_by_roll(item["Roll No"])
+                            if s_rec:
+                                disp_res = dispatch_student_recommendations_and_predictions(
+                                    student_id=s_rec["student_id"],
+                                    send_email_flag=True,
+                                    send_whatsapp_flag=False,
+                                    custom_note="Course Instructor Advisory: Please review your continuous internal evaluation standing and implement these targeted remedial recommendations.",
+                                    is_scheduled_daily=False,
+                                )
+                                if disp_res.get("success"):
+                                    sent_emails += disp_res.get("emails_sent", 0)
+                    st.success(f"🎉 Successfully dispatched AI Predictions & Recommendations to {sent_emails} student email(s) in Section {chosen_slot['section']}!")
         else:
             st.success(f"All {len(roster)} registered students in Section {chosen_slot['section']} are currently meeting continuous internal evaluation benchmarks (CIE ≥ 24/60)!")
 
@@ -334,3 +350,4 @@ elif selected_ai_tool == "💬 Student Academic Sentiment Pulse":
         - 🟡 *"Requesting 10 more minutes during lab sessions to test edge cases on memory allocation."*
         - 🟢 *"Regular weekly quizzes helped keep up with the continuous evaluation without feeling overwhelmed before midterms."*
         """)
+
