@@ -2775,6 +2775,80 @@ def update_leave_request_status(leave_id: int, status: str, action_by: str, rema
         conn.close()
 
 
+
+# ===========================================================
+# FACULTY-TO-STUDENT 360 MENTORING & COUNSELING NOTES
+# ===========================================================
+
+def ensure_mentoring_notes_table(connection=None):
+    close_after = False
+    if connection is None:
+        connection = get_connection()
+        close_after = True
+    try:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS faculty_student_mentoring_notes (
+                note_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                faculty_id INTEGER NOT NULL,
+                meeting_type TEXT NOT NULL, -- '1-on-1 Academic Counseling', 'Attendance Remediation', 'Performance Review', 'Career Guidance'
+                notes TEXT NOT NULL,
+                action_items TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (student_id) REFERENCES students(student_id),
+                FOREIGN KEY (faculty_id) REFERENCES faculty(faculty_id)
+            )
+        """)
+        connection.commit()
+    except Exception as e:
+        print(f"Error ensuring mentoring notes table: {e}")
+    finally:
+        if close_after:
+            connection.close()
+
+
+def add_faculty_mentoring_note(student_id: int, faculty_id: int, meeting_type: str, notes: str, action_items: str = ""):
+    ensure_mentoring_notes_table()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO faculty_student_mentoring_notes (student_id, faculty_id, meeting_type, notes, action_items)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (student_id, faculty_id, meeting_type, notes, action_items)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error adding mentoring note: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_faculty_mentoring_notes(student_id: int, faculty_id: int = None):
+    ensure_mentoring_notes_table()
+    conn = get_connection()
+    try:
+        query = """
+            SELECT n.*, f.full_name AS faculty_name, f.designation
+            FROM faculty_student_mentoring_notes n
+            JOIN faculty f ON f.faculty_id = n.faculty_id
+            WHERE n.student_id = ?
+        """
+        params = [student_id]
+        if faculty_id:
+            query += " AND n.faculty_id = ?"
+            params.append(faculty_id)
+
+        query += " ORDER BY n.note_id DESC"
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 # ===========================================================
 # MAIN
 # ===========================================================

@@ -21,6 +21,9 @@ if str(ROOT_DIR) not in sys.path:
 
 from auth import require_faculty
 from database import (
+    add_faculty_mentoring_note,
+    get_faculty_mentoring_notes,
+    get_course_feedback_records,
     get_student_grievances,
     update_grievance_status,
     get_student_leave_requests,
@@ -106,7 +109,7 @@ with st.sidebar:
             "📢 Send Student Notifications",
             "⚖️ Grievance & Leave Approval Desk",
             "📈 NBA / NAAC OBE Attainment Ledger",
-            "🔍 Student Search & Summary",
+            "👤 Student 360° Dossier & Mentorship",
             "🚨 At-Risk Student Detection",
             "📡 Send Predictions & Recommendations",
             "📊 Section Analytics & Trends",
@@ -798,71 +801,255 @@ elif faculty_nav == "📈 NBA / NAAC OBE Attainment Ledger":
     )
 
 
-elif faculty_nav == "🔍 Student Search & Summary":
-    st.subheader("🔍 Institutional Student Lookup & Academic Profile")
-    st.caption("Search across the 500 registered first-year students across Sections A through J.")
+elif faculty_nav in ("👤 Student 360° Dossier & Mentorship", "🔍 Student Search & Summary"):
+    st.subheader("👤 Student 360° Comprehensive Dossier & Mentorship Hub")
+    st.caption("Complete 360-degree student intelligence: personal credentials, parental contacts, CIE 60/40 assessments, attendance records, AI risk radar, and confidential faculty mentoring logs.")
 
-    search_query = st.text_input("Enter Roll Number (e.g., 26STU0001) or Name", "").strip()
+    faculty_sections = sorted(list(set(item["section"] for item in schedule))) if schedule else ["A"]
 
-    if search_query:
+    lookup_mode = st.radio(
+        "Select Discovery Mode",
+        [
+            "📋 Browse My Assigned Section Roster",
+            "🔍 Search Across All 500 Institutional Students",
+        ],
+        horizontal=True,
+    )
+
+    selected_student_record = None
+
+    if lookup_mode == "📋 Browse My Assigned Section Roster":
+        b_c1, b_c2 = st.columns([1, 2])
+        with b_c1:
+            sel_sec_browse = st.selectbox("Select Assigned Section", faculty_sections, key="fac_360_sec")
+        
         conn = get_connection()
-        matched = conn.execute(
+        sec_roster = conn.execute(
             """
-            SELECT student_id, roll_number, full_name, department, section,
-                   current_year, semester, cgpa, attendance_percentage,
-                   internal_marks, external_marks
-            FROM students
-            WHERE roll_number LIKE ? OR full_name LIKE ?
-            LIMIT 10
+            SELECT s.*
+            FROM students s
+            JOIN semester_registrations sr ON sr.student_id = s.student_id
+            WHERE sr.section = ? AND sr.status = 'Registered'
+            ORDER BY s.roll_number ASC
             """,
-            (f"%{search_query}%", f"%{search_query}%")
+            (sel_sec_browse,)
         ).fetchall()
         conn.close()
 
-        if not matched:
-            st.warning("No students matched your search criteria.")
+        if sec_roster:
+            stu_options = {
+                f"{r['roll_number']} · {r['full_name']} (CIE: {float(r['internal_marks'] or 0):.1f}/60 | Att: {float(r['attendance_percentage'] or 0):.1f}%)": dict(r)
+                for r in sec_roster
+            }
+            with b_c2:
+                sel_stu_label = st.selectbox("Select Student from Section", list(stu_options.keys()), key="fac_360_picker")
+                selected_student_record = stu_options[sel_stu_label]
         else:
-            for s in matched:
-                s_dict = dict(s)
-                with st.container(border=True):
-                    sc1, sc2, sc3 = st.columns([2, 1, 1])
-                    with sc1:
-                        st.markdown(f"#### **{s_dict['full_name']}** (`{s_dict['roll_number']}`)")
-                        st.write(f"**Department:** {s_dict['department']} · **Section:** Section {s_dict.get('section', 'N/A')}")
-                        st.write(f"**Year/Sem:** Year {s_dict['current_year']}, Semester {s_dict['semester']}")
-                    with sc2:
-                        att_v = float(s_dict.get("attendance_percentage") or 0)
-                        st.metric("Attendance", f"{att_v:.1f}%")
-                        int_v = s_dict.get("internal_marks")
-                        st.metric("CIE Internal", f"{int_v:.1f}/60" if int_v is not None else "Pending")
-                    with sc3:
-                        stat_label = "Good Standing" if (int_v or 0) >= 30 and att_v >= 75 else ("Academic Watch" if att_v >= 65 else "Critical Risk")
-                        st.metric("CIE Standing", stat_label)
-                        st.metric("Evaluation Model", "In-Semester CIE")
+            st.warning(f"No registered students found in Section {sel_sec_browse}.")
 
-                    # Course assessments for this student
-                    stu_assess = get_student_course_assessments(s_dict["student_id"], s_dict["semester"])
-                    if stu_assess:
-                        with st.expander(f"View {s_dict['full_name']}'s Continuous Assessment Breakdown (8 Courses)", expanded=False):
-                            st.dataframe(
-                                pd.DataFrame([
-                                    {
-                                        "Course Code": a["course_code"],
-                                        "Course Name": a["course_name"],
-                                        "Mid /30": a.get("mid_exam_marks"),
-                                        "Assn /10": a.get("assignment_marks"),
-                                        "Quiz /10": a.get("quiz_marks"),
-                                        "Viva /10": a.get("viva_marks"),
-                                        "Internal /60": a.get("internal_total"),
-                                        "Attendance %": f"{a.get('course_attendance', 0):.1f}%",
-                                    }
-                                    for a in stu_assess
-                                ]),
-                                use_container_width=True,
-                                hide_index=True,
-                            )
     else:
-        st.info("Enter a student's roll number or name above to view their academic records.")
+        search_query = st.text_input("Enter Roll Number (e.g., 26STU0001), Name, or Email", placeholder="e.g. 26STU0042 or Ananya").strip()
+        if search_query:
+            conn = get_connection()
+            matched = conn.execute(
+                """
+                SELECT * FROM students
+                WHERE roll_number LIKE ? OR full_name LIKE ? OR email LIKE ?
+                LIMIT 10
+                """,
+                (f"%{search_query}%", f"%{search_query}%", f"%{search_query}%")
+            ).fetchall()
+            conn.close()
+
+            if matched:
+                s_match_map = {f"{r['roll_number']} · {r['full_name']} (Sec {r.get('section', '—')})": dict(r) for r in matched}
+                sel_s_match = st.selectbox("Select Matched Student", list(s_match_map.keys()), key="fac_360_match_pick")
+                selected_student_record = s_match_map[sel_s_match]
+            else:
+                st.warning("No student matching that query found in database.")
+
+    # Render Full 360 Degree Dossier if student selected
+    if selected_student_record:
+        s_data = selected_student_record
+        stu_id = s_data["student_id"]
+        roll_no = s_data["roll_number"]
+        full_name_s = s_data["full_name"]
+        att_pct = float(s_data.get("attendance_percentage") or 0.0)
+        cie_val = float(s_data.get("internal_marks") or 0.0)
+        ext_val = float(s_data.get("external_marks") or 0.0)
+        tot_val = cie_val + ext_val
+        is_compliant = att_pct >= 75.0
+
+        st.divider()
+
+        # Header Profile Box
+        with st.container(border=True):
+            pcol1, pcol2, pcol3 = st.columns([1, 2.5, 1.5])
+            with pcol1:
+                st.markdown(
+                    f"""
+                    <div style="background: linear-gradient(135deg, #0f172a, #1e3a8a); color: white; border-radius: 10px; height: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+                        <span style="font-size: 2.2rem; font-weight: 800;">{full_name_s[:2].upper()}</span>
+                        <span style="font-size: 0.75rem; color: #93c5fd; margin-top: 4px;">Student Dossier</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            with pcol2:
+                st.markdown(f"### {full_name_s}")
+                st.markdown(f"**Roll Number:** `{roll_no}` | **Enrollment ID:** `{s_data.get('enrollment_no', 'N/A')}`")
+                st.markdown(f"**Department:** {s_data.get('department')} | **Assigned Section:** Section {s_data.get('section', 'N/A')}")
+                st.caption(f"Academic Year: Year {s_data.get('current_year', 1)} · Semester {s_data.get('semester', 1)}")
+            with pcol3:
+                status_color = "#16a34a" if is_compliant else "#dc2626"
+                status_text = "● Statutory Exam Eligible" if is_compliant else "○ Attendance Shortage (<75%)"
+                st.markdown(f"<div style='background: {status_color}; color: white; padding: 6px 12px; border-radius: 6px; font-weight: 700; text-align: center; margin-bottom: 8px;'>{status_text}</div>", unsafe_allow_html=True)
+                st.metric("Statutory Attendance", f"{att_pct:.1f}%", delta="Compliant" if is_compliant else "Shortage", delta_color="normal" if is_compliant else "inverse")
+
+        # 4 Interactive Dossier Tabs
+        t_dossier, t_marks, t_ai_insight, t_mentor = st.tabs([
+            "📋 Personal, Contact & Parent Details",
+            "📊 Continuous Assessments & Gradebook",
+            "🧠 AI Risk Forecast & XAI Recommendations",
+            "📝 Faculty Mentoring & 1-on-1 Counseling Log",
+        ])
+
+        with t_dossier:
+            st.markdown("##### 👤 Complete Personal Credentials & Institutional Directory Information")
+            c_d1, c_d2 = st.columns(2)
+            with c_d1:
+                st.markdown(f"**Student Email:** `{s_data.get('email', 'N/A')}`")
+                st.markdown(f"**Student Mobile Phone:** `{s_data.get('phone', 'N/A')}`")
+                st.markdown(f"**Date of Birth:** {s_data.get('date_of_birth', 'N/A')}")
+                st.markdown(f"**Gender:** {s_data.get('gender', 'N/A')}")
+                st.markdown(f"**Blood Group:** `{s_data.get('blood_group', 'N/A')}`")
+            with c_d2:
+                st.markdown(f"**Father's Name:** {s_data.get('father_name', 'N/A')}")
+                st.markdown(f"**Mother's Name:** {s_data.get('mother_name', 'N/A')}")
+                st.markdown(f"**Parent Emergency Contact:** `{s_data.get('parent_phone', 'N/A')}`")
+                st.markdown(f"**Parent Email:** `{s_data.get('parent_email', 'N/A')}`")
+                st.markdown(f"**Permanent Address:** {s_data.get('address', 'N/A')}")
+
+            st.markdown("##### ⚡ Quick Faculty-to-Student Communication Channels")
+            q1, q2, q3 = st.columns(3)
+            with q1:
+                if s_data.get("email"):
+                    st.link_button("✉️ Send Outlook / Gmail Email", f"mailto:{s_data['email']}", use_container_width=True)
+            with q2:
+                if s_data.get("phone"):
+                    clean_phone = s_data['phone'].replace("+", "").replace(" ", "")
+                    st.link_button("💬 Open WhatsApp Chat with Student", f"https://wa.me/{clean_phone}", use_container_width=True)
+            with q3:
+                if s_data.get("parent_phone"):
+                    clean_p_phone = s_data['parent_phone'].replace("+", "").replace(" ", "")
+                    st.link_button("📞 Open WhatsApp with Parent", f"https://wa.me/{clean_p_phone}", use_container_width=True)
+
+        with t_marks:
+            st.markdown("##### 📊 Course-Level Continuous Internal Evaluation (CIE 60/40 Breakdown)")
+            stu_assess = get_student_course_assessments(stu_id, int(s_data.get("semester") or 1))
+            if stu_assess:
+                c_rows = []
+                for a in stu_assess:
+                    c_mid = a.get("mid_exam_marks")
+                    c_assn = a.get("assignment_marks")
+                    c_quiz = a.get("quiz_marks")
+                    c_viva = a.get("viva_marks")
+                    c_int = (c_mid or 0) + (c_assn or 0) + (c_quiz or 0) + (c_viva or 0) if c_mid is not None else None
+                    c_att = float(a.get("course_attendance") or 0.0)
+
+                    c_rows.append({
+                        "Course Code": a.get("course_code"),
+                        "Course Name": a.get("course_name"),
+                        "Mid /30": f"{c_mid:.1f}" if c_mid is not None else "—",
+                        "Assn /10": f"{c_assn:.1f}" if c_assn is not None else "—",
+                        "Quiz /10": f"{c_quiz:.1f}" if c_quiz is not None else "—",
+                        "Viva /10": f"{c_viva:.1f}" if c_viva is not None else "—",
+                        "Internal CIE /60": f"{c_int:.1f}" if c_int is not None else "—",
+                        "Attendance %": f"{c_att:.1f}%",
+                        "Course Status": "On Track" if (c_int or 0) >= 30 else ("Remedial Needed" if (c_int or 0) < 24 else "Borderline"),
+                    })
+                st.dataframe(pd.DataFrame(c_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("No course assessment records currently posted for this student.")
+
+        with t_ai_insight:
+            st.markdown("##### 🧠 Explainable AI Predictions & Academic Risk Radar")
+            preview_data = get_single_student_advisory_preview(stu_id)
+            if preview_data:
+                ac1, ac2, ac3 = st.columns(3)
+                ac1.metric("Predicted Trajectory", preview_data.get("predicted_perf", "N/A"))
+                risk_lvl = preview_data.get("risk_level", "Low")
+                ac2.metric(
+                    "Risk Level",
+                    risk_lvl,
+                    delta="Requires Remedial" if risk_lvl in ("High", "Medium") else "Good Standing",
+                    delta_color="inverse" if risk_lvl in ("High", "Medium") else "normal"
+                )
+                ac3.metric("Continuous Internal CIE", f"{cie_val:.1f} / 60")
+
+                st.markdown("**Explainable AI Diagnostic Synthesis:**")
+                st.info(preview_data.get("xai_summary", "Diagnostic active."))
+
+                st.markdown("**Personalized AI Course Interventions:**")
+                for rec_i in preview_data.get("recommendations", []):
+                    st.markdown(f"- 📌 {rec_i}")
+
+        with t_mentor:
+            st.markdown("##### 📝 Confidential Faculty Mentoring & Counseling Record")
+            st.caption("Record official 1-on-1 mentoring discussions, remedial study agreements, and behavioral counseling milestones directly into the student's permanent academic record.")
+
+            with st.form(f"add_mentoring_note_form_{stu_id}"):
+                col_mt1, col_mt2 = st.columns(2)
+                with col_mt1:
+                    m_type = st.selectbox(
+                        "Counseling Session Type",
+                        [
+                            "1-on-1 Academic Counseling & Study Plan",
+                            "Attendance Remediation & Statutory Warning",
+                            "CIE Performance Review & Mid-Exam Debrief",
+                            "Career, Project & Research Mentorship",
+                            "Behavioral / Personal Support Counseling"
+                        ]
+                    )
+                with col_mt2:
+                    m_act = st.text_input("Target Action Items for Student", placeholder="e.g. Complete 3 pointer exercises by Thursday; Attend Friday lab tutorial")
+
+                m_notes = st.text_area(
+                    "Faculty Mentoring Observations & Discussion Summary",
+                    placeholder="Document student's explanation for absences/low marks, remedial steps agreed upon, and follow-up timeline...",
+                    height=100
+                )
+
+                sub_note_btn = st.form_submit_button("💾 Save Mentoring Note to Student Record", type="primary", use_container_width=True)
+                if sub_note_btn:
+                    if not m_notes.strip():
+                        st.error("Please enter counseling notes before saving.")
+                    else:
+                        success = add_faculty_mentoring_note(
+                            student_id=stu_id,
+                            faculty_id=faculty_id,
+                            meeting_type=m_type,
+                            notes=m_notes.strip(),
+                            action_items=m_act.strip()
+                        )
+                        if success:
+                            st.success("🎉 Mentoring counseling record saved permanently to student dossier!")
+                            st.rerun()
+
+            st.markdown("##### 📜 Chronological Mentorship History for this Student")
+            past_notes = get_faculty_mentoring_notes(student_id=stu_id)
+            if past_notes:
+                for n in past_notes:
+                    with st.container(border=True):
+                        st.markdown(f"**[{n['meeting_type']}]** · Recorded by **{n['faculty_name']}** ({n.get('designation', 'Faculty')})")
+                        st.caption(f"Session Timestamp: {n['created_at']}")
+                        st.write(n["notes"])
+                        if n.get("action_items"):
+                            st.markdown(f"🎯 **Action Items Assigned:** `{n['action_items']}`")
+            else:
+                st.info("No mentoring sessions logged for this student yet. Use the form above to record counseling meetings.")
+
+
 
 # =============================================================
 # TAB 4: AT-RISK STUDENT DETECTION
