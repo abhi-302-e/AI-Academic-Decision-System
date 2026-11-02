@@ -623,7 +623,7 @@ elif faculty_nav == "📢 Send Student Notifications":
         with c_sec_ind:
             sel_f_sec_ind = st.selectbox("Select Section", faculty_sections, key="fac_notif_sec_ind")
         conn = get_connection()
-        sec_stus = conn.execute(
+        raw_sec_stus = conn.execute(
             """
             SELECT s.student_id, s.roll_number, s.full_name, s.email, s.phone
             FROM students s
@@ -634,12 +634,13 @@ elif faculty_nav == "📢 Send Student Notifications":
             (sel_f_sec_ind,)
         ).fetchall()
         conn.close()
+        sec_stus = [dict(r) for r in raw_sec_stus]
 
         if sec_stus:
-            s_opts = {f"{r['roll_number']} · {r['full_name']}": r for r in sec_stus}
+            s_opts = {f"{r['roll_number']} · {r['full_name']}": dict(r) for r in sec_stus}
             with c_stu_ind:
                 chosen_s_label = st.selectbox("Select Recipient Student", list(s_opts.keys()))
-                target_stu_records = [s_opts[chosen_s_label]]
+                target_stu_records = [dict(s_opts[chosen_s_label])]
 
     st.info(f"🎯 **Target Recipient Count:** {len(target_stu_records)} student(s)")
 
@@ -1251,7 +1252,7 @@ elif faculty_nav == "📡 Send Predictions & Recommendations":
 
         # Fetch students for that section
         conn = get_connection()
-        sec_students = conn.execute(
+        raw_sec_students = conn.execute(
             """
             SELECT s.student_id, s.roll_number, s.full_name, s.email, s.phone,
                    s.attendance_percentage, s.internal_marks
@@ -1263,17 +1264,18 @@ elif faculty_nav == "📡 Send Predictions & Recommendations":
             (sel_sec,)
         ).fetchall()
         conn.close()
+        sec_students = [dict(r) for r in raw_sec_students]
 
         if not sec_students:
             st.warning(f"No registered students found in Section {sel_sec}.")
         else:
             student_map = {
-                f"{r['roll_number']} · {r['full_name']} (CIE: {float(r['internal_marks'] or 0):.1f}/60 | Att: {float(r['attendance_percentage'] or 0):.1f}%)": r
+                f"{r['roll_number']} · {r['full_name']} (CIE: {float(r['internal_marks'] or 0):.1f}/60 | Att: {float(r['attendance_percentage'] or 0):.1f}%)": dict(r)
                 for r in sec_students
             }
             with col_stu_pick:
                 chosen_label = st.selectbox("Select Student", list(student_map.keys()))
-                chosen_student = student_map[chosen_label]
+                chosen_student = dict(student_map[chosen_label])
 
             # Fetch AI Advisory Preview
             stu_id = chosen_student["student_id"]
