@@ -301,6 +301,10 @@ def predict_student_comprehensive(student_id, semester=1):
     Generate comprehensive course-wise and overall prediction for registered student
     using Admin-trained ML models and Admin academic policies.
     """
+    if isinstance(student_id, dict):
+        student_id = student_id.get("student_id")
+    elif isinstance(student_id, str) and str(student_id).isdigit():
+        student_id = int(student_id)
     from database import (
         get_student_semester_registration,
         get_student_course_assessments,
