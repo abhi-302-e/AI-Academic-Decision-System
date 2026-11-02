@@ -2577,6 +2577,204 @@ def create_bulk_student_notifications(student_ids: list, title: str, message: st
         conn.close()
 
 
+
+# ===========================================================
+# REAL-WORLD INSTITUTIONAL ERP EXTENSIONS:
+# 1. Examination Admit Card & Hall Ticket Verification
+# 2. Academic Grievance & Marks Scrutiny Redressal
+# 3. On-Duty (OD) & Medical Leave Management
+# ===========================================================
+
+def ensure_enterprise_erp_tables(connection=None):
+    close_after = False
+    if connection is None:
+        connection = get_connection()
+        close_after = True
+    try:
+        # Academic Grievances
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS student_grievances (
+                grievance_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                course_id INTEGER,
+                grievance_type TEXT NOT NULL, -- 'CIE Marks Scrutiny', 'Attendance Discrepancy', 'Curriculum Issue', 'General'
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                status TEXT DEFAULT 'Pending Review', -- 'Pending Review', 'Under Evaluation', 'Resolved', 'Rejected'
+                faculty_remarks TEXT,
+                assigned_faculty_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TIMESTAMP,
+                FOREIGN KEY (student_id) REFERENCES students(student_id),
+                FOREIGN KEY (course_id) REFERENCES courses(course_id)
+            )
+        """)
+
+        # On-Duty (OD) & Medical Leave Applications
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS student_leave_requests (
+                leave_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                leave_type TEXT NOT NULL, -- 'On-Duty (Hackathon/Technical Event)', 'On-Duty (Sports/Cultural)', 'Medical Leave', 'Family Emergency'
+                from_date DATE NOT NULL,
+                to_date DATE NOT NULL,
+                reason TEXT NOT NULL,
+                supporting_document_ref TEXT,
+                status TEXT DEFAULT 'Pending Faculty Approval', -- 'Pending Faculty Approval', 'Approved', 'Rejected'
+                action_by TEXT,
+                action_remarks TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                action_at TIMESTAMP,
+                FOREIGN KEY (student_id) REFERENCES students(student_id)
+            )
+        """)
+        connection.commit()
+    except Exception as e:
+        print(f"Error ensuring enterprise ERP tables: {e}")
+    finally:
+        if close_after:
+            connection.close()
+
+
+def submit_student_grievance(student_id: int, grievance_type: str, title: str, description: str, course_id: int = None, faculty_id: int = None):
+    ensure_enterprise_erp_tables()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO student_grievances (student_id, course_id, grievance_type, title, description, assigned_faculty_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (student_id, course_id, grievance_type, title, description, faculty_id)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error submitting grievance: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_student_grievances(student_id: int = None, faculty_id: int = None, status: str = None):
+    ensure_enterprise_erp_tables()
+    conn = get_connection()
+    try:
+        query = """
+            SELECT g.*, s.full_name AS student_name, s.roll_number, s.section,
+                   c.course_name, COALESCE(c.catalog_code, c.course_code) AS course_code,
+                   f.full_name AS faculty_name
+            FROM student_grievances g
+            JOIN students s ON s.student_id = g.student_id
+            LEFT JOIN courses c ON c.course_id = g.course_id
+            LEFT JOIN faculty f ON f.faculty_id = g.assigned_faculty_id
+            WHERE 1=1
+        """
+        params = []
+        if student_id:
+            query += " AND g.student_id = ?"
+            params.append(student_id)
+        if faculty_id:
+            query += " AND (g.assigned_faculty_id = ? OR g.assigned_faculty_id IS NULL)"
+            params.append(faculty_id)
+        if status and status != "All":
+            query += " AND g.status = ?"
+            params.append(status)
+
+        query += " ORDER BY g.grievance_id DESC"
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def update_grievance_status(grievance_id: int, status: str, remarks: str):
+    ensure_enterprise_erp_tables()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            UPDATE student_grievances
+            SET status = ?, faculty_remarks = ?, resolved_at = CURRENT_TIMESTAMP
+            WHERE grievance_id = ?
+            """,
+            (status, remarks, grievance_id)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error updating grievance: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def submit_student_leave_request(student_id: int, leave_type: str, from_date: str, to_date: str, reason: str):
+    ensure_enterprise_erp_tables()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO student_leave_requests (student_id, leave_type, from_date, to_date, reason)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (student_id, leave_type, from_date, to_date, reason)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error submitting leave request: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_student_leave_requests(student_id: int = None, status: str = None):
+    ensure_enterprise_erp_tables()
+    conn = get_connection()
+    try:
+        query = """
+            SELECT lr.*, s.full_name AS student_name, s.roll_number, s.section, s.department
+            FROM student_leave_requests lr
+            JOIN students s ON s.student_id = lr.student_id
+            WHERE 1=1
+        """
+        params = []
+        if student_id:
+            query += " AND lr.student_id = ?"
+            params.append(student_id)
+        if status and status != "All":
+            query += " AND lr.status = ?"
+            params.append(status)
+
+        query += " ORDER BY lr.leave_id DESC"
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def update_leave_request_status(leave_id: int, status: str, action_by: str, remarks: str):
+    ensure_enterprise_erp_tables()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            UPDATE student_leave_requests
+            SET status = ?, action_by = ?, action_remarks = ?, action_at = CURRENT_TIMESTAMP
+            WHERE leave_id = ?
+            """,
+            (status, action_by, remarks, leave_id)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error updating leave status: {e}")
+        return False
+    finally:
+        conn.close()
+
+
 # ===========================================================
 # MAIN
 # ===========================================================

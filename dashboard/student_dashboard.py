@@ -20,6 +20,11 @@ if str(ROOT_DIR) not in sys.path:
 
 from auth import require_student
 from database import (
+    ensure_enterprise_erp_tables,
+    submit_student_grievance,
+    get_student_grievances,
+    submit_student_leave_request,
+    get_student_leave_requests,
     ensure_course_feedback_table,
     submit_course_feedback,
     get_student_submitted_feedback,
@@ -227,11 +232,15 @@ with st.sidebar:
         "Student Navigation",
         [
             "🏛️ Portal Overview",
+            "🎫 Examination Hall Ticket & Admit Card",
             "👤 Personal & Parent Details",
             "💳 Fee Payment & Ledger",
             "📚 Academic Curriculum",
             "⭐ Course & Faculty Feedback",
+            "⚖️ Academic Grievances & Redressal",
+            "🏥 On-Duty (OD) & Leave Application",
             "📊 Continuous Internal Evaluation (CIE /60)",
+            "🎛️ What-If Grade & CIE Simulator",
             "📅 Timetable & Attendance",
             "🧠 AI Decision Engine & XAI",
             "🎯 Targeted Recommendations & Alerts",
@@ -427,7 +436,320 @@ with kpi_cols[4]:
 # =============================================================
 # TAB 1: PORTAL OVERVIEW
 # =============================================================
-if student_nav == "🏛️ Portal Overview":
+# =============================================================
+# TAB: EXAMINATION HALL TICKET & ADMIT CARD
+# =============================================================
+if student_nav == "🎫 Examination Hall Ticket & Admit Card":
+    st.subheader("🎫 Institutional Examination Hall Ticket & Admit Card")
+    st.caption("Official statutory examination authorization issued by the Office of the Controller of Examinations.")
+
+    # Statutory compliance check: Attendance >= 75.0%
+    curr_att = float(student.get("attendance_percentage") or 0.0)
+    is_att_compliant = curr_att >= 75.0
+
+    if not is_registered:
+        st.error("⛔ **ADMIT CARD WITHHELD:** You have not completed Semester Registration for Batch 2026–27.")
+    elif not is_att_compliant:
+        st.error(
+            f"⛔ **STATUTORY ATTENDANCE DEBARMENT:** Your recorded attendance is **{curr_att:.1f}%**, which is below "
+            f"the institutional mandatory threshold of **75.0%**. In accordance with university academic regulations, "
+            f"you are currently ineligible to appear for the End-Semester External Examinations."
+        )
+        st.info("💡 **Next Steps:** Submit an Academic Grievance or consult your Academic Mentor regarding statutory attendance remediation.")
+    else:
+        st.success("✅ **ELIGIBILITY VERIFIED:** You have satisfied all statutory attendance and curriculum requirements for End-Semester Examinations.")
+
+        # Institutional Hall Ticket Layout
+        with st.container(border=True):
+            st.markdown(
+                f"""
+                <div style="text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 0.8rem; margin-bottom: 1rem;">
+                    <div style="font-size: 1.25rem; font-weight: 800; color: #0f172a; letter-spacing: 0.05em;">ICFAI FOUNDATION FOR HIGHER EDUCATION (IFHE)</div>
+                    <div style="font-size: 0.88rem; color: #475569; font-weight: 600;">FACULTY OF SCIENCE & TECHNOLOGY — HYDERABAD</div>
+                    <div style="font-size: 1rem; font-weight: 700; color: #1e3a8a; margin-top: 0.4rem; background: #e0e7ff; display: inline-block; padding: 2px 14px; border-radius: 4px;">
+                        END-SEMESTER EXTERNAL EXAMINATION ADMIT CARD (BATCH 2026–27)
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            c_info1, c_info2, c_photo = st.columns([1.5, 1.5, 1])
+            with c_info1:
+                st.markdown(f"**Candidate Name:** {full_name}")
+                st.markdown(f"**Roll Number:** `{roll_number}`")
+                st.markdown(f"**Enrollment No:** `{enrollment_number}`")
+                st.markdown(f"**Department:** {department}")
+            with c_info2:
+                st.markdown(f"**Program:** B.Tech (Honors)")
+                st.markdown(f"**Year / Semester:** Year {current_year} · Sem {current_semester}")
+                st.markdown(f"**Assigned Section:** Section {assigned_section}")
+                st.markdown(f"**Statutory Attendance:** **{curr_att:.1f}% (Compliant)**")
+            with c_photo:
+                st.markdown(
+                    f"""
+                    <div style="border: 2px dashed #94a3b8; border-radius: 8px; height: 110px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f8fafc;">
+                        <span style="font-size: 1.8rem; font-weight: 700; color: #1e293b;">{full_name[:2].upper()}</span>
+                        <span style="font-size: 0.7rem; color: #64748b; margin-top: 4px;">Verified Photo ID</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            st.divider()
+
+            st.markdown("##### 📅 Scheduled Theory & Practical Examination Timetable")
+            registered_courses = get_student_registered_courses(student_id, current_semester)
+            exam_schedule = [
+                {"Date": "14-Dec-2026", "Session": "Morning (09:30 AM – 12:30 PM)", "Course Code": "CS101", "Course Title": "Computer Programming & Problem Solving", "Exam Venue": "Auditorium Block - Hall A-102", "Invigilator Sign": "______________"},
+                {"Date": "16-Dec-2026", "Session": "Morning (09:30 AM – 12:30 PM)", "Course Code": "MA101", "Course Title": "Mathematics I (Linear Algebra & Calculus)", "Exam Venue": "Auditorium Block - Hall A-104", "Invigilator Sign": "______________"},
+                {"Date": "18-Dec-2026", "Session": "Morning (09:30 AM – 12:30 PM)", "Course Code": "PH101", "Course Title": "Applied Engineering Physics", "Exam Venue": "Science Block - Hall S-201", "Invigilator Sign": "______________"},
+                {"Date": "21-Dec-2026", "Session": "Morning (09:30 AM – 12:30 PM)", "Course Code": "EE101", "Course Title": "Basic Electrical Sciences", "Exam Venue": "Tech Block - Hall T-302", "Invigilator Sign": "______________"},
+                {"Date": "23-Dec-2026", "Session": "Afternoon (02:00 PM – 05:00 PM)", "Course Code": "CS102", "Course Title": "Programming Laboratory Practical Exam", "Exam Venue": "Computing Lab 4", "Invigilator Sign": "______________"},
+            ]
+            st.dataframe(pd.DataFrame(exam_schedule), use_container_width=True, hide_index=True)
+
+            st.markdown(
+                """
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #cbd5e1;">
+                    <div style="font-size: 0.75rem; color: #64748b; font-family: monospace;">
+                        SECURE DIGITAL VERIFICATION TOKEN: [IFHE-COE-2026-AUTONOMOUS-VERIFIED-SEAL]<br>
+                        Generated: November 2026 | Candidate Signature: _______________________
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-weight: 700; font-size: 0.9rem; color: #0f172a;">Controller of Examinations</div>
+                        <div style="font-size: 0.75rem; color: #475569;">IFHE University Hyderabad</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        st.download_button(
+            "📥 Print / Export Official Examination Hall Ticket (PDF)",
+            data=f"ICFAI Foundation for Higher Education\nExamination Admit Card 2026-27\nCandidate: {full_name} ({roll_number})\nDepartment: {department}\nAttendance: {curr_att:.1f}% (Statutory Compliant)",
+            file_name=f"hall_ticket_{roll_number}.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+
+
+# =============================================================
+# TAB: ACADEMIC GRIEVANCES & REDRESSAL
+# =============================================================
+elif student_nav == "⚖️ Academic Grievances & Redressal":
+    st.subheader("⚖️ Academic Grievance & Marks Scrutiny Redressal Desk")
+    st.caption("Official university portal for lodging continuous evaluation disputes, marks scrutiny requests, and attendance reconciliations.")
+
+    tab_lodge, tab_g_track = st.tabs([
+        "📝 Lodge New Academic Grievance",
+        "📋 Grievance Tracking & Resolution Status"
+    ])
+
+    with tab_lodge:
+        with st.form("student_lodge_grievance_form"):
+            g_type = st.selectbox(
+                "Grievance Category",
+                [
+                    "CIE Marks Scrutiny (Mid Exam / Assignment / Quiz / Viva)",
+                    "Attendance Discrepancy / Biometric Reconciliation",
+                    "Continuous Assessment Question Paper Ambiguity",
+                    "General Academic Counseling Request"
+                ]
+            )
+            g_title = st.text_input("Grievance Headline", placeholder="e.g. Discrepancy in Mid-1 Question 3 Marking")
+            
+            registered_courses = get_student_registered_courses(student_id, current_semester)
+            c_opts = {"General / None": None}
+            for c in registered_courses:
+                c_opts[f"{c['course_code']} - {c['course_name']}"] = c["course_id"]
+            
+            sel_c_label = st.selectbox("Relevant Course Subject", list(c_opts.keys()))
+            chosen_c_id = c_opts[sel_c_label]
+
+            g_desc = st.text_area(
+                "Detailed Description & Justification",
+                placeholder="Explain the specific discrepancy, date of assessment, question number, or attendance session...",
+                height=120
+            )
+
+            submit_g_btn = st.form_submit_button("🚀 Submit Formal Grievance", type="primary", use_container_width=True)
+            if submit_g_btn:
+                if not g_title.strip() or not g_desc.strip():
+                    st.error("Please provide both a headline and detailed description.")
+                else:
+                    success = submit_student_grievance(
+                        student_id=student_id,
+                        grievance_type=g_type,
+                        title=g_title.strip(),
+                        description=g_desc.strip(),
+                        course_id=chosen_c_id
+                    )
+                    if success:
+                        st.success("🎉 Your grievance has been officially registered with the Academic Review Committee.")
+                        st.rerun()
+                    else:
+                        st.error("Failed to submit grievance. Please try again.")
+
+    with tab_g_track:
+        my_grievances = get_student_grievances(student_id=student_id)
+        if not my_grievances:
+            st.info("You have not lodged any academic grievances.")
+        else:
+            for g in my_grievances:
+                with st.container(border=True):
+                    g_c1, g_c2 = st.columns([3, 1])
+                    with g_c1:
+                        st.markdown(f"**Grievance #{g['grievance_id']} · {g['title']}**")
+                        st.caption(f"Category: {g['grievance_type']} | Course: {g.get('course_name', 'General')} | Lodged: {g['created_at']}")
+                        st.write(g["description"])
+                    with g_c2:
+                        status_color = "#16a34a" if g["status"] == "Resolved" else ("#2563eb" if g["status"] == "Under Evaluation" else "#d97706")
+                        st.markdown(f"<span style='background: {status_color}; color: white; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 0.85rem;'>{g['status']}</span>", unsafe_allow_html=True)
+
+                    if g.get("faculty_remarks"):
+                        st.markdown(f"**Reviewer Remarks:** *{g.get('faculty_remarks', '')}*")
+
+
+# =============================================================
+# TAB: ON-DUTY (OD) & LEAVE APPLICATION
+# =============================================================
+elif student_nav == "🏥 On-Duty (OD) & Leave Application":
+    st.subheader("🏥 On-Duty (OD) Attendance & Medical Leave Portal")
+    st.caption("Apply for excused institutional absences (Hackathons, Sports, Medical) to maintain statutory attendance compliance.")
+
+    tab_apply_od, tab_od_status = st.tabs([
+        "📝 Submit Leave / OD Application",
+        "📋 Leave Application History & Status"
+    ])
+
+    with tab_apply_od:
+        with st.form("student_leave_application_form"):
+            l_type = st.selectbox(
+                "Leave / OD Classification",
+                [
+                    "On-Duty (Hackathon / Technical Competition / Paper Presentation)",
+                    "On-Duty (Inter-University Sports / Cultural Representation)",
+                    "Medical Leave (Inpatient / Outpatient Hospitalization)",
+                    "Special Bereavement / Family Emergency"
+                ]
+            )
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                f_date = st.date_input("From Date")
+            with col_d2:
+                t_date = st.date_input("To Date")
+
+            l_reason = st.text_area(
+                "Detailed Purpose & Event / Hospitalization Details",
+                placeholder="Mention event name, organizing institution, or medical diagnosis...",
+                height=100
+            )
+
+            submit_l_btn = st.form_submit_button("🚀 Submit for Faculty & Departmental Approval", type="primary", use_container_width=True)
+            if submit_l_btn:
+                if not l_reason.strip():
+                    st.error("Please provide a reason and event details.")
+                elif f_date > t_date:
+                    st.error("From Date cannot be later than To Date.")
+                else:
+                    success = submit_student_leave_request(
+                        student_id=student_id,
+                        leave_type=l_type,
+                        from_date=str(f_date),
+                        to_date=str(t_date),
+                        reason=l_reason.strip()
+                    )
+                    if success:
+                        st.success("🎉 Leave / OD Application submitted successfully. Awaiting Faculty review.")
+                        st.rerun()
+                    else:
+                        st.error("Failed to submit application.")
+
+    with tab_od_status:
+        my_leaves = get_student_leave_requests(student_id=student_id)
+        if not my_leaves:
+            st.info("You have not submitted any Leave or On-Duty applications.")
+        else:
+            for l in my_leaves:
+                with st.container(border=True):
+                    lc1, lc2 = st.columns([3, 1])
+                    with lc1:
+                        st.markdown(f"**Application #{l['leave_id']} · {l['leave_type']}**")
+                        st.caption(f"Duration: {l['from_date']} to {l['to_date']} | Applied: {l['created_at']}")
+                        st.write(l["reason"])
+                    with lc2:
+                        l_color = "#16a34a" if l["status"] == "Approved" else ("#dc2626" if l["status"] == "Rejected" else "#d97706")
+                        st.markdown(f"<span style='background: {l_color}; color: white; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 0.85rem;'>{l['status']}</span>", unsafe_allow_html=True)
+
+                    if l.get("action_remarks"):
+                        st.markdown(f"**Department Remarks:** *{l.get('action_remarks', '')}* (By {l.get('action_by', 'Faculty')})")
+
+
+# =============================================================
+# TAB: WHAT-IF GRADE & CIE SIMULATOR
+# =============================================================
+elif student_nav == "🎛️ What-If Grade & CIE Simulator":
+    st.subheader("🎛️ Interactive 'What-If' CIE & Final Grade Simulator")
+    st.caption("Forecast your end-semester letter grades by dynamically adjusting prospective scores on upcoming continuous assessments.")
+
+    registered_courses = get_student_registered_courses(student_id, current_semester)
+    if not registered_courses:
+        st.info("Please register for courses to use the What-If Simulator.")
+    else:
+        c_names = {f"{c['course_code']} - {c['course_name']}": c for c in registered_courses}
+        sel_sim_c = st.selectbox("Select Course for Simulation", list(c_names.keys()))
+        sim_course = c_names[sel_sim_c]
+
+        st.markdown("##### 🎚️ Adjust Simulated Assessment Scores")
+        with st.container(border=True):
+            sc1, sc2, sc3 = st.columns(3)
+            with sc1:
+                sim_mid = st.slider("Simulated Mid Exam (/30)", min_value=0.0, max_value=30.0, value=22.0, step=0.5)
+            with sc2:
+                sim_quiz = st.slider("Simulated Quizzes (/10)", min_value=0.0, max_value=10.0, value=8.5, step=0.5)
+            with sc3:
+                sim_assn = st.slider("Simulated Assignment (/10)", min_value=0.0, max_value=10.0, value=9.0, step=0.5)
+
+            sc4, sc5 = st.columns(2)
+            with sc4:
+                sim_viva = st.slider("Simulated Viva Voce (/10)", min_value=0.0, max_value=10.0, value=7.5, step=0.5)
+            with sc5:
+                sim_see = st.slider("Projected End-Sem External Exam (/40)", min_value=0.0, max_value=40.0, value=30.0, step=1.0)
+
+            total_cie = sim_mid + sim_quiz + sim_assn + sim_viva
+            total_100 = total_cie + sim_see
+
+            # Letter Grade Calculation
+            if total_100 >= 90:
+                grade, gpa, standing = "O (Outstanding)", 10.0, "University Gold Tier"
+            elif total_100 >= 80:
+                grade, gpa, standing = "A+ (Excellent)", 9.0, "First Class with Distinction"
+            elif total_100 >= 70:
+                grade, gpa, standing = "A (Very Good)", 8.0, "First Class"
+            elif total_100 >= 60:
+                grade, gpa, standing = "B+ (Good)", 7.0, "High Second Class"
+            elif total_100 >= 50:
+                grade, gpa, standing = "B (Above Average)", 6.0, "Second Class"
+            elif total_100 >= 40:
+                grade, gpa, standing = "C (Pass)", 5.0, "Passing Standard"
+            else:
+                grade, gpa, standing = "F (Remedial Fail)", 0.0, "Remedial Summer Term Required"
+
+            st.divider()
+
+            res_c1, res_c2, res_c3 = st.columns(3)
+            res_c1.metric("Projected Total Score", f"{total_100:.1f} / 100", delta=f"{total_cie:.1f}/60 CIE")
+            res_c2.metric("Projected Letter Grade", grade)
+            res_c3.metric("Projected Grade Points", f"{gpa:.1f} CGPA Impact")
+
+            if total_cie < 24.0:
+                st.error("⚠️ **CIE In-Semester Deficit:** Your simulated Continuous Internal Evaluation is below the mandatory 24/60 passing benchmark.")
+            else:
+                st.success(f"🎉 **On-Track Trajectory:** Standing projected as **{standing}**.")
+
+
+elif student_nav == "🏛️ Portal Overview":
     col_profile, col_highlights = st.columns([1.1, 1])
 
     with col_profile:
