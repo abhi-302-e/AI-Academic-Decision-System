@@ -20,13 +20,14 @@ if str(ROOT_DIR) not in sys.path:
 
 import importlib
 import database
-if not hasattr(database, "get_student_detailed_course_attendance") or not hasattr(database, "ensure_enterprise_erp_tables"):
+if not hasattr(database, "get_student_course_attendance_history") or not hasattr(database, "get_student_detailed_course_attendance") or not hasattr(database, "ensure_enterprise_erp_tables"):
     importlib.reload(database)
 
 from auth import require_student
 from database import (
     get_student_detailed_course_attendance,
     get_student_recent_attendance_sessions,
+    get_student_course_attendance_history,
     ensure_enterprise_erp_tables,
     get_connection,
     submit_student_grievance,
@@ -249,7 +250,7 @@ with st.sidebar:
             "🏥 On-Duty (OD) & Leave Application",
             "📊 Continuous Internal Evaluation (CIE /60)",
             "🎛️ What-If Grade & CIE Simulator",
-            "📅 Course Attendance & Timetable",
+            "📅 Course Attendance & History",
             "🧠 AI Decision Engine & XAI",
             "🎯 Targeted Recommendations & Alerts",
             f"🔔 Notifications ({unread_count})",
@@ -1592,9 +1593,9 @@ elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
 # =============================================================
 # TAB 6: TIMETABLE & ATTENDANCE
 # =============================================================
-elif student_nav in ("📅 Course Attendance & Timetable", "📅 Timetable & Attendance"):
-    st.subheader("📅 Course-wise Attendance Intelligence & Timetable Portal")
-    st.caption("Institutional attendance tracking per course, statutory 75% examination compliance margins, and weekly section schedule.")
+elif student_nav in ("📅 Course Attendance & History", "📅 Course Attendance & Timetable", "📅 Timetable & Attendance"):
+    st.subheader("📅 Course-wise Attendance & History Intelligence Portal")
+    st.caption("Institutional per-course attendance tracking, full lecture session history, statutory 75% exam margins, and weekly section timetable.")
 
     # Top Executive Statutory Summary Banner
     curr_att_val = float(student.get("attendance_percentage") or 78.5)
@@ -1624,17 +1625,20 @@ elif student_nav in ("📅 Course Attendance & Timetable", "📅 Timetable & Att
         unsafe_allow_html=True,
     )
 
-    tab_course_att, tab_schedule_grid, tab_session_logs = st.tabs([
+    course_att_records = get_student_detailed_course_attendance(student_id, current_semester)
+
+    tab_course_ledger, tab_history_explorer, tab_schedule_grid = st.tabs([
         "📊 Course-by-Course Attendance Ledger",
+        "📜 Course Attendance History Explorer",
         "📅 Weekly Section Timetable Matrix",
-        "📋 Session-by-Session Biometric Log"
     ])
 
-    with tab_course_att:
+    # -------------------------------------------------------------
+    # TAB 6.1: COURSE-BY-COURSE ATTENDANCE LEDGER
+    # -------------------------------------------------------------
+    with tab_course_ledger:
         st.markdown("##### 📚 Real-Time Attendance Ledger by Registered Course")
-        st.caption("Track total conducted sessions, classes attended, missed lectures, and your statutory safety margin for each subject.")
-
-        course_att_records = get_student_detailed_course_attendance(student_id, current_semester)
+        st.caption("Track total conducted sessions, classes attended, missed lectures, and statutory safety margin for each subject.")
 
         if not course_att_records:
             st.info("No registered courses found for attendance calculation.")
@@ -1652,7 +1656,7 @@ elif student_nav in ("📅 Course Attendance & Timetable", "📅 Timetable & Att
 
             st.divider()
 
-            # Course Cards & Progress Bars
+            # Course Cards with Inlined Session History Expander
             for c_att in course_att_records:
                 with st.container(border=True):
                     c_col1, c_col2, c_col3 = st.columns([2.5, 1.5, 1.5])
@@ -1671,7 +1675,33 @@ elif student_nav in ("📅 Course Attendance & Timetable", "📅 Timetable & Att
                     frac = min(1.0, max(0.0, c_att["attendance_percentage"] / 100.0))
                     st.progress(frac)
 
-            # Tabular Ledger View
+                    # Expandable Course History
+                    with st.expander(f"📜 View Complete Session Attendance History for {c_att['course_code']}"):
+                        ch_logs = get_student_course_attendance_history(student_id, course_id=c_att['course_id'])
+                        if not ch_logs:
+                            st.info(f"No specific session records logged yet for {c_att['course_code']}.")
+                        else:
+                            ch_df = pd.DataFrame([
+                                {
+                                    "Date": h["session_date"],
+                                    "Day": h["day"],
+                                    "Slot": h["slot"],
+                                    "Classroom": h.get("room_number", "LH-101"),
+                                    "Instructor": h.get("faculty_name", c_att["faculty_name"]),
+                                    "Status": "🟢 Present" if h["is_present"] else "🔴 Absent",
+                                }
+                                for h in ch_logs
+                            ])
+                            st.dataframe(ch_df, use_container_width=True, hide_index=True)
+                            st.download_button(
+                                f"📥 Download {c_att['course_code']} History (CSV)",
+                                data=ch_df.to_csv(index=False),
+                                file_name=f"{roll_number}_{c_att['course_code']}_attendance.csv",
+                                mime="text/csv",
+                                key=f"dl_course_hist_{c_att['course_id']}"
+                            )
+
+            # Tabular Consolidated Summary
             st.markdown("##### 📋 Consolidated Course Attendance Summary Table")
             ledger_table = [
                 {
@@ -1694,9 +1724,97 @@ elif student_nav in ("📅 Course Attendance & Timetable", "📅 Timetable & Att
                 data=pd.DataFrame(ledger_table).to_csv(index=False),
                 file_name=f"course_attendance_{roll_number}.csv",
                 mime="text/csv",
-                use_container_width=True
+                use_container_width=True,
+                key="dl_consolidated_att_csv"
             )
 
+    # -------------------------------------------------------------
+    # TAB 6.2: COURSE ATTENDANCE HISTORY EXPLORER (DEDICATED)
+    # -------------------------------------------------------------
+    with tab_history_explorer:
+        st.markdown("##### 📜 Chronological Course Attendance History Explorer")
+        st.caption("Inspect your full class attendance timeline. Filter by specific course or attendance status (Present vs Absent).")
+
+        filter_col1, filter_col2 = st.columns([2, 1])
+
+        course_options = ["All Registered Courses"]
+        course_map = {}
+        for r in course_att_records:
+            label = f"{r['course_code']} — {r['course_name']}"
+            course_options.append(label)
+            course_map[label] = r["course_id"]
+
+        with filter_col1:
+            sel_course_label = st.selectbox(
+                "Select Course to View Attendance History",
+                course_options,
+                index=0,
+                key="att_hist_course_filter"
+            )
+        with filter_col2:
+            sel_status_label = st.selectbox(
+                "Filter by Attendance Status",
+                ["All Sessions", "🟢 Present Only", "🔴 Absent Only"],
+                index=0,
+                key="att_hist_status_filter"
+            )
+
+        status_param = "All"
+        if "Present" in sel_status_label:
+            status_param = "Present"
+        elif "Absent" in sel_status_label:
+            status_param = "Absent"
+
+        chosen_cid = course_map.get(sel_course_label)
+
+        # Query history
+        full_history = get_student_course_attendance_history(student_id, course_id=chosen_cid, status_filter=status_param, limit=500)
+
+        # Highlight Metrics for Selected Filter
+        tot_hist = len(full_history)
+        tot_p = sum(1 for h in full_history if h["is_present"])
+        tot_a = tot_hist - tot_p
+        hist_pct = (tot_p / tot_hist * 100.0) if tot_hist > 0 else 0.0
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Sessions in View", f"{tot_hist} Classes")
+        m2.metric("Attended (Present)", f"{tot_p} Classes")
+        m3.metric("Absences (Missed)", f"{tot_a} Classes", delta=f"{tot_a} missed", delta_color="inverse" if tot_a > 0 else "normal")
+        m4.metric("Session Attendance Rate", f"{hist_pct:.1f}%", delta="Compliant" if hist_pct >= 75.0 else "Shortage", delta_color="normal" if hist_pct >= 75.0 else "inverse")
+
+        st.divider()
+
+        if not full_history:
+            st.info("No attendance records match the selected filters.")
+        else:
+            table_history = [
+                {
+                    "Session Date": h["session_date"],
+                    "Day & Period": f"{h['day']} ({h['slot']})",
+                    "Course Code": h["course_code"],
+                    "Course Name": h["course_name"],
+                    "Classroom": h.get("room_number") or "LH-101",
+                    "Faculty Instructor": h.get("faculty_name") or "Department Faculty",
+                    "Attendance Status": "🟢 Present" if h["is_present"] else "🔴 Absent",
+                }
+                for h in full_history
+            ]
+            df_hist = pd.DataFrame(table_history)
+            st.dataframe(df_hist, use_container_width=True, hide_index=True)
+
+            fname_suffix = sel_course_label.split(" — ")[0] if " — " in sel_course_label else "all_courses"
+            st.download_button(
+                f"📥 Export {fname_suffix} Attendance History (CSV)",
+                data=df_hist.to_csv(index=False),
+                file_name=f"attendance_history_{roll_number}_{fname_suffix}.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="dl_filtered_hist_csv"
+            )
+
+    # -------------------------------------------------------------
+    # TAB 6.3: WEEKLY SECTION TIMETABLE MATRIX
+    # -------------------------------------------------------------
     with tab_schedule_grid:
         st.markdown(f"##### 📅 Weekly Section Schedule · Section {assigned_section}")
         st.caption("50-minute teaching slots conducted Monday through Saturday as scheduled by Academic Administration.")
@@ -1709,30 +1827,10 @@ elif student_nav in ("📅 Course Attendance & Timetable", "📅 Timetable & Att
                 day = item["day"]
                 slot = item["slot"]
                 if day in grid_data and slot in grid_data[day]:
-                    grid_data[day][slot] = f"{item['course_code']}\n({item['room_number']})"
+                    grid_data[day][slot] = str(item["course_code"]) + " (" + str(item["room_number"]) + ")"
 
             matrix_df = pd.DataFrame.from_dict(grid_data, orient="index")
             st.dataframe(matrix_df, use_container_width=True)
-
-    with tab_session_logs:
-        st.markdown("##### 📋 Recent Session-by-Session Biometric Attendance Log")
-        st.caption("Chronological record of recent class sessions marked by course instructors.")
-
-        recent_logs = get_student_recent_attendance_sessions(student_id, limit=30)
-        if not recent_logs:
-            st.info("Session attendance records are logged automatically as faculty submits daily rosters.")
-        else:
-            formatted_logs = [
-                {
-                    "Date": log["session_date"],
-                    "Course": f"{log['course_code']} - {log['course_name']}",
-                    "Faculty": log.get("faculty_name", "Course Faculty"),
-                    "Slot": f"{log['day']} {log['slot']}",
-                    "Status": "🟢 Present" if log["is_present"] else "🔴 Absent",
-                }
-                for log in recent_logs
-            ]
-            st.dataframe(pd.DataFrame(formatted_logs), use_container_width=True, hide_index=True)
 
 
 # =============================================================

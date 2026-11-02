@@ -2999,6 +2999,44 @@ def get_student_recent_attendance_sessions(student_id: int, limit: int = 25):
         conn.close()
 
 
+def get_student_course_attendance_history(student_id: int, course_id: int = None, status_filter: str = "All", limit: int = 500):
+    """
+    Returns full chronological attendance session history for a student,
+    optionally filtered by specific course_id and status ('All', 'Present', 'Absent').
+    """
+    conn = get_connection()
+    try:
+        query = """
+            SELECT sess.session_id, sess.session_date, t.day, t.slot, t.room_number,
+                   c.course_id, c.course_name, COALESCE(c.catalog_code, c.course_code) AS course_code,
+                   f.full_name AS faculty_name, ar.is_present
+            FROM attendance_session_records ar
+            JOIN attendance_sessions sess ON sess.session_id = ar.session_id
+            JOIN timetable t ON t.timetable_id = sess.timetable_id
+            JOIN courses c ON c.course_id = t.course_id
+            LEFT JOIN faculty f ON f.faculty_id = sess.faculty_id
+            WHERE ar.student_id = ?
+        """
+        params = [student_id]
+
+        if course_id is not None and str(course_id).strip():
+            query += " AND c.course_id = ?"
+            params.append(int(course_id))
+
+        if status_filter == "Present":
+            query += " AND ar.is_present = 1"
+        elif status_filter == "Absent":
+            query += " AND ar.is_present = 0"
+
+        query += " ORDER BY sess.session_date DESC, sess.session_id DESC LIMIT ?"
+        params.append(limit)
+
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 # ===========================================================
 # MAIN
 # ===========================================================
