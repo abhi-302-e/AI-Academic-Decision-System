@@ -21,6 +21,7 @@ if str(ROOT_DIR) not in sys.path:
 from auth import require_student
 from database import (
     ensure_enterprise_erp_tables,
+    get_connection,
     submit_student_grievance,
     get_student_grievances,
     submit_student_leave_request,

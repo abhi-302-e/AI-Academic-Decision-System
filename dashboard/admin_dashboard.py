@@ -21,6 +21,7 @@ from database import (
     create_student_notification,
     create_bulk_student_notifications,
     ensure_course_feedback_table,
+    ensure_enterprise_erp_tables,
     get_course_feedback_records,
     get_connection,
     get_course_model_training_data,
