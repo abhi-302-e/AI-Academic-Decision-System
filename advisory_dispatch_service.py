@@ -332,23 +332,23 @@ def dispatch_student_recommendations_and_predictions(
     init_dispatch_settings_table()
     conn = get_connection()
     try:
+        # Guaranteed dispatch to all 500 institutional students
         query = """
             SELECT s.student_id, s.roll_number, s.full_name, s.email, s.phone,
                    s.parent_phone, s.cgpa, s.attendance_percentage, s.section,
-                   s.semester, s.current_year, s.department
+                   s.semester, s.current_year, s.department, s.enrollment_no, s.internal_marks
             FROM students s
-            JOIN semester_registrations sr ON sr.student_id = s.student_id
-            WHERE sr.status = 'Registered'
+            WHERE 1=1
         """
         params = []
         if student_id:
             query += " AND s.student_id = ?"
             params.append(student_id)
         elif section and section != "All Sections":
-            query += " AND sr.section = ?"
+            query += " AND s.section = ?"
             params.append(section)
 
-        query += " GROUP BY s.student_id ORDER BY s.roll_number ASC"
+        query += " ORDER BY s.roll_number ASC"
         students = conn.execute(query, params).fetchall()
     finally:
         conn.close()
@@ -426,12 +426,12 @@ def dispatch_student_recommendations_and_predictions(
                 to_email=s_email,
                 full_name=full_name,
                 roll_no=roll_no,
-                enrollment_no=roll_no,
+                enrollment_no=s.get("enrollment_no") or roll_no,
                 risk_level=risk_level,
                 predicted_perf=predicted_perf,
                 cgpa=cgpa_val,
                 attendance=att_val,
-                recommendations_list=recs[:4],
+                recommendations_list=recs[:5],
                 xai_summary=xai_summary,
                 custom_note=custom_note or "",
             )
@@ -440,6 +440,22 @@ def dispatch_student_recommendations_and_predictions(
                 email_status = "Delivered"
             else:
                 email_status = e_res.get("status", "Failed")
+
+            # Persist every single email record into database communication_logs
+            try:
+                log_communication(
+                    recipient_type="Student",
+                    recipient_name=full_name,
+                    recipient_contact=s_email,
+                    channel="Email",
+                    sender_email=get_configured_admin_email(),
+                    subject=f"Academic Decision Advisory & Recommendations - {full_name} ({roll_no})",
+                    message=f"Predicted Performance: {predicted_perf} | Risk Level: {risk_level} | Attendance: {att_val:.1f}% | CIE Marks: {cgpa_val:.1f}/60 | Key Advice: {recs[0] if recs else 'Maintain attendance'}",
+                    status=email_status,
+                    error_message=e_res.get("message") if not e_res.get("success") else None
+                )
+            except Exception as log_err:
+                print(f"Error logging email communication for {roll_no}: {log_err}")
 
         # Dispatch WhatsApp
         if send_whatsapp_flag and s_phone:
@@ -457,6 +473,22 @@ def dispatch_student_recommendations_and_predictions(
                 sms_status = "Delivered"
             else:
                 sms_status = w_res.get("status", "Failed")
+
+            # Persist every single whatsapp record into database communication_logs
+            try:
+                log_communication(
+                    recipient_type="Student",
+                    recipient_name=full_name,
+                    recipient_contact=s_phone,
+                    channel="WhatsApp",
+                    sender_email=get_configured_admin_email(),
+                    subject=f"WhatsApp Advisory - {roll_no}",
+                    message=f"Risk: {risk_level} | Action: {top_rec}",
+                    status=sms_status,
+                    error_message=w_res.get("message") if not w_res.get("success") else None
+                )
+            except Exception as log_err:
+                print(f"Error logging WhatsApp communication for {roll_no}: {log_err}")
 
         logs.append({
             "roll_number": roll_no,
@@ -663,3 +695,10 @@ def start_scheduler_service():
 
 # Scheduler can be started on demand or via app.py
 # start_scheduler_service()
+
+
+# Auto-start daily 6 PM scheduler service on load
+try:
+    start_scheduler_service()
+except Exception:
+    pass
