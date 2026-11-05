@@ -393,7 +393,51 @@ def dispatch_student_recommendations_and_predictions(
     smtp_session = None
     if send_email_flag:
         smtp_session = ManagedSMTPSession(timeout=10)
-        smtp_session.connect()
+        is_conn = smtp_session.connect()
+        if not is_conn:
+            err_msg = smtp_session.connect_error or "Unable to connect to Gmail SMTP Gateway"
+            status_label = "Rate Limited (454)" if getattr(smtp_session, "is_rate_limited", False) else "Gateway Error"
+            for idx, student_row in enumerate(students, 1):
+                s = dict(student_row)
+                full_name = s["full_name"]
+                roll_no = s["roll_number"]
+                s_email = s.get("email")
+                logs.append({
+                    "roll_number": roll_no,
+                    "full_name": full_name,
+                    "section": s.get("section", "—"),
+                    "risk": "—",
+                    "email_status": status_label,
+                    "sms_status": "Skipped",
+                })
+                if s_email:
+                    try:
+                        log_communication(
+                            recipient_type="Student",
+                            recipient_name=full_name,
+                            recipient_contact=s_email,
+                            channel="Email",
+                            sender_email=get_configured_admin_email(),
+                            subject=f"Academic Advisory (Dispatch Paused) - {full_name} ({roll_no})",
+                            message=f"SMTP Gateway Paused: {err_msg}",
+                            status=status_label,
+                            error_message=err_msg,
+                        )
+                    except Exception:
+                        pass
+                if progress_callback and (idx % 100 == 0 or idx == total_count):
+                    progress_callback(idx, total_count, f"Logging status: {idx}/{total_count}")
+
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            return {
+                "success": False,
+                "total": total_count,
+                "emails_sent": 0,
+                "sms_sent": 0,
+                "timestamp": now_str,
+                "logs": logs,
+                "message": f"SMTP Gateway Paused: {err_msg}",
+            }
 
     try:
         for idx, student_row in enumerate(students, 1):

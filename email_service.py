@@ -25,13 +25,26 @@ except ImportError:
 ADMIN_EMAIL_ADDRESS = "forestnation08@gmail.com"
 
 def get_secret(key, default=""):
-    """Read Streamlit Cloud secrets first, then environment variables."""
+    """Read Streamlit Cloud secrets first, then DB outbound settings, then environment variables."""
     try:
         if hasattr(st, "secrets") and st.secrets is not None:
             if key in st.secrets:
                 val = st.secrets[key]
-                if val is not None:
+                if val is not None and str(val).strip():
                     return str(val).strip()
+    except Exception:
+        pass
+
+    try:
+        from database import get_connection
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT setting_value FROM outbound_dispatch_settings WHERE setting_key = ?",
+            (key,)
+        ).fetchone()
+        conn.close()
+        if row and row["setting_value"] and str(row["setting_value"]).strip():
+            return str(row["setting_value"]).strip()
     except Exception:
         pass
 
@@ -41,24 +54,27 @@ def get_secret(key, default=""):
     return str(env_val).strip()
 
 
-EMAIL_ADDRESS = (
-    get_secret("SMTP_EMAIL")
-    or get_secret("EMAIL_ADDRESS")
-    or ADMIN_EMAIL_ADDRESS
-)
-
-EMAIL_APP_PASSWORD = (
-    get_secret("SMTP_APP_PASSWORD")
-    or get_secret("EMAIL_APP_PASSWORD")
-)
-
-
 def get_configured_admin_email():
-    return EMAIL_ADDRESS
+    return (
+        get_secret("SMTP_EMAIL")
+        or get_secret("EMAIL_ADDRESS")
+        or ADMIN_EMAIL_ADDRESS
+    )
+
+
+def get_configured_admin_password():
+    return (
+        get_secret("SMTP_APP_PASSWORD")
+        or get_secret("EMAIL_APP_PASSWORD")
+    )
+
+
+EMAIL_ADDRESS = get_configured_admin_email()
+EMAIL_APP_PASSWORD = get_configured_admin_password()
 
 
 def is_email_service_active():
-    return bool(EMAIL_APP_PASSWORD)
+    return bool(get_configured_admin_password())
 
 
 class ManagedSMTPSession:
@@ -66,39 +82,79 @@ class ManagedSMTPSession:
     Persistent, auto-reconnecting SMTP session manager for bulk / batch email dispatch.
     Reuses an established SSL connection across all 500 students, avoiding
     500 individual SSL handshakes, DNS timeouts, socket exhaustion, and UI freezes.
+    Supports dual-port connectivity (Port 465 SSL with Port 587 STARTTLS fallback)
+    and graceful rate-limit handling.
     """
     def __init__(self, from_email=None, app_password=None, host="smtp.gmail.com", port=465, timeout=12):
         import time as _t
         self._time = _t
         self.from_email = from_email or get_configured_admin_email()
-        self.app_password = app_password or (
-            get_secret("SMTP_APP_PASSWORD") or get_secret("EMAIL_APP_PASSWORD")
-        )
+        self.app_password = app_password or get_configured_admin_password()
         self.host = host
         self.port = port
         self.timeout = timeout
         self.smtp = None
         self.is_active = bool(self.app_password)
         self.connect_error = None
+        self.is_rate_limited = False
         self.total_sent = 0
         self.connection_attempts = 0
 
     def connect(self):
+        self.app_password = self.app_password or get_configured_admin_password()
+        self.from_email = self.from_email or get_configured_admin_email()
+
         if not self.app_password:
-            self.connect_error = "Gmail SMTP credentials missing. Check SMTP_APP_PASSWORD in secrets."
+            self.connect_error = "Gmail SMTP credentials missing. Check SMTP_APP_PASSWORD in secrets or admin settings."
             self.is_active = False
             return False
+
+        self.connection_attempts += 1
+
+        # Attempt 1: Port 465 SSL
         try:
-            self.connection_attempts += 1
-            self.smtp = smtplib.SMTP_SSL(self.host, self.port, timeout=self.timeout)
+            self.smtp = smtplib.SMTP_SSL(self.host, 465, timeout=self.timeout)
             self.smtp.login(self.from_email, self.app_password)
             self.connect_error = None
             self.is_active = True
+            self.is_rate_limited = False
             return True
-        except Exception as e:
-            self.smtp = None
-            self.connect_error = str(e)
-            return False
+        except Exception as e465:
+            err465 = str(e465)
+            if "454" in err465 or "Too many login attempts" in err465:
+                self.smtp = None
+                self.is_rate_limited = True
+                self.connect_error = (
+                    "Gmail SMTP Security Rate Limit (Code 454: Too many login attempts). "
+                    "Google requires a cooling-off period (~15–30 minutes) before allowing new sign-ins."
+                )
+                self.is_active = False
+                return False
+
+            # Attempt 2: Fallback to Port 587 STARTTLS
+            try:
+                self.smtp = smtplib.SMTP(self.host, 587, timeout=self.timeout)
+                self.smtp.ehlo()
+                self.smtp.starttls()
+                self.smtp.ehlo()
+                self.smtp.login(self.from_email, self.app_password)
+                self.connect_error = None
+                self.is_active = True
+                self.is_rate_limited = False
+                return True
+            except Exception as e587:
+                self.smtp = None
+                err587 = str(e587)
+                if "454" in err587 or "Too many login attempts" in err587:
+                    self.is_rate_limited = True
+                    self.connect_error = (
+                        "Gmail SMTP Security Rate Limit (Code 454: Too many login attempts). "
+                        "Google requires a cooling-off period (~15–30 minutes) before allowing new sign-ins."
+                    )
+                else:
+                    self.connect_error = f"SMTP connection failed: {err587} (Port 465: {err465})"
+                self.is_active = False
+                return False
 
     def is_connected(self):
         if self.smtp is None:
@@ -159,6 +215,26 @@ class ManagedSMTPSession:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+
+def test_smtp_connection(from_email=None, app_password=None):
+    """
+    Test Gmail SMTP connectivity and return (success: bool, message: str).
+    """
+    email_to_test = from_email or get_configured_admin_email()
+    pwd_to_test = app_password or get_configured_admin_password()
+
+    if not pwd_to_test:
+        return False, "Gmail App Password is missing. Please provide SMTP_APP_PASSWORD in secrets or admin settings."
+
+    sess = ManagedSMTPSession(from_email=email_to_test, app_password=pwd_to_test, timeout=10)
+    connected = sess.connect()
+    if connected:
+        sess.close()
+        return True, f"Successfully authenticated with Gmail SMTP Gateway as {email_to_test}."
+    else:
+        err = sess.connect_error or "Unknown SMTP error"
+        return False, err
 
 
 def send_email(

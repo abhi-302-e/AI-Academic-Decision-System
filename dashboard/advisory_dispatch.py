@@ -33,7 +33,9 @@ from database import (
 from email_service import (
     send_email,
     get_configured_admin_email,
+    get_configured_admin_password,
     is_email_service_active,
+    test_smtp_connection,
 )
 from sms_service import (
     send_academic_update_sms,
@@ -54,6 +56,7 @@ from advisory_dispatch_service import (
     check_and_run_daily_6pm_dispatch,
     get_single_student_advisory_preview,
     update_student_email_in_db,
+    set_dispatch_setting,
 )
 
 # Enforce admin authentication
@@ -82,9 +85,16 @@ with st.container(border=True):
         mail_active = is_email_service_active()
         st.markdown("**📧 Gmail SMTP Gateway**")
         if mail_active:
-            st.success("● Connected / Live")
+            st.success("● Password Configured")
         else:
             st.warning("○ Password Required")
+        if st.button("🔌 Test Live Connection", key="test_smtp_ribbon_btn", use_container_width=True):
+            with st.spinner("Testing Gmail SMTP handshake..."):
+                ok, msg = test_smtp_connection()
+            if ok:
+                st.success(f"● Authenticated: {msg}")
+            else:
+                st.error(f"○ {msg}")
 
     with dcol3:
         wa_active = is_sms_service_configured()
@@ -101,6 +111,30 @@ with st.container(border=True):
             st.success("● Active (18:00 IST)")
         else:
             st.error("○ Disabled")
+
+    with st.expander("⚙️ Manage Institutional SMTP Sender & App Password Override", expanded=False):
+        st.caption("Update the institutional sender email or 16-character Gmail App Password stored for dispatches:")
+        st_c1, st_c2 = st.columns(2)
+        with st_c1:
+            cfg_email_in = st.text_input("Sender Gmail Address", value=admin_email, key="cfg_admin_email_in")
+        with st_c2:
+            cfg_pw_in = st.text_input("16-Character Gmail App Password", type="password", placeholder="Enter app password (e.g. abcd efgh ijkl mnop)", key="cfg_admin_pw_in")
+        if st.button("💾 Save Credentials & Verify Connection", key="save_smtp_creds_btn"):
+            if cfg_email_in.strip():
+                set_dispatch_setting("SMTP_EMAIL", cfg_email_in.strip())
+            if cfg_pw_in.strip():
+                clean_pw = cfg_pw_in.strip().replace(" ", "")
+                set_dispatch_setting("SMTP_APP_PASSWORD", clean_pw)
+            st.success("Credentials saved to system settings!")
+            test_ok, test_msg = test_smtp_connection(
+                from_email=cfg_email_in.strip() if cfg_email_in.strip() else None,
+                app_password=cfg_pw_in.strip().replace(" ", "") if cfg_pw_in.strip() else None,
+            )
+            if test_ok:
+                st.success(f"🎉 Connection verified: {test_msg}")
+            else:
+                st.warning(f"Connection verification notice: {test_msg}")
+            st.rerun()
 
 st.divider()
 
@@ -286,7 +320,12 @@ with tab_manual:
                         with st.expander("View Delivery Details", expanded=False):
                             st.dataframe(pd.DataFrame(res.get("logs")), use_container_width=True, hide_index=True)
                 else:
-                    st.error(f"❌ Dispatch failed: {res.get('message')}")
+                    st.error(f"❌ Dispatch status: {res.get('message')}")
+                    if "454" in str(res.get('message', '')) or "Too many login attempts" in str(res.get('message', '')):
+                        st.warning("⏳ **Google SMTP Rate Limit Active:** Google has temporarily paused authentication for `forestnation08@gmail.com` because previous runs attempted repeated logins in a short time. Please wait 15–30 minutes without clicking dispatch for Google's security counter to expire, or update with a fresh App Password above.")
+                    if res.get("logs"):
+                        with st.expander("View Delivery Logs", expanded=True):
+                            st.dataframe(pd.DataFrame(res.get("logs")), use_container_width=True, hide_index=True)
 
 # =========================================================
 # TAB 2: AUTOMATED DAILY 6:00 PM DISPATCHER
