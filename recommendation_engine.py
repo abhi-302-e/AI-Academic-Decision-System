@@ -94,16 +94,16 @@ def generate_course_level_recommendations(course_dict, policies=None):
             "text": f"Attendance is at {att:.1f}%. Aim for {(att_thresh + 10.0):.0f}%+ to secure full continuous assessment credits.",
         })
 
-    # Internal marks breakdown & CIE Critical Threshold
-    if internal_total < crit_int_thresh:
+    # Mid-term checks (Mid-1 conducted, Mid-2 pending)
+    m1_val = course_dict.get("mid_1_marks")
+    if m1_val is not None and float(m1_val) < 7.5:
         recommendations.append({
-            "category": "CIE Continuous Evaluation Alert",
-            "priority": "Critical",
-            "icon": "⚠️",
-            "text": f"Total Continuous Internal Evaluation (CIE) is {internal_total:.1f}/60, which is below the institutional passing threshold of {crit_int_thresh:.0f}/60. Mandatory remedial tutorial registration is required.",
+            "category": "Mid-1 Academic Intervention",
+            "priority": "High",
+            "icon": "📖",
+            "text": f"Mid-1 score is {float(m1_val):.1f}/15 (below passing target of 7.5/15). Review lecture notes and consult {faculty} to strengthen fundamentals before Mid-2.",
         })
-
-    if mid < mid_thresh:
+    elif course_dict.get("mid_exam_marks") is not None and mid < mid_thresh:
         recommendations.append({
             "category": "UCI Exam Preparation Factor",
             "priority": "High",
@@ -111,7 +111,16 @@ def generate_course_level_recommendations(course_dict, policies=None):
             "text": f"Mid-term examination score is {mid:.1f}/30 (below cutoff of {mid_thresh:.0f}). Schedule a 1-on-1 review with {faculty} to clarify core conceptual deficiencies before the external exam.",
         })
 
-    if assn < assn_thresh:
+    # Internal marks breakdown & CIE Critical Threshold
+    if course_dict.get("internal_total") is not None and internal_total < crit_int_thresh:
+        recommendations.append({
+            "category": "CIE Continuous Evaluation Alert",
+            "priority": "Critical",
+            "icon": "⚠️",
+            "text": f"Total Continuous Internal Evaluation (CIE) is {internal_total:.1f}/60, which is below the institutional passing threshold of {crit_int_thresh:.0f}/60. Mandatory remedial tutorial registration is required.",
+        })
+
+    if course_dict.get("assignment_marks") is not None and assn < assn_thresh:
         recommendations.append({
             "category": "OULAD Continuous Telemetry",
             "priority": "High",
@@ -119,7 +128,7 @@ def generate_course_level_recommendations(course_dict, policies=None):
             "text": f"Assignment score is {assn:.1f}/10 (below target {assn_thresh:.0f}). OULAD learning analytics show that proactive submission correlates with a +18% grade lift. Submit upcoming assignments on time.",
         })
 
-    if quiz < quiz_thresh:
+    if course_dict.get("quiz_marks") is not None and quiz < quiz_thresh:
         recommendations.append({
             "category": "Continuous Assessment",
             "priority": "Medium",
@@ -127,7 +136,7 @@ def generate_course_level_recommendations(course_dict, policies=None):
             "text": f"Quiz performance is {quiz:.1f}/10 (below target {quiz_thresh:.0f}). Practice weekly topic-wise formative quizzes on the university LMS to build conceptual mastery.",
         })
 
-    if viva < viva_thresh:
+    if course_dict.get("viva_marks") is not None and viva < viva_thresh:
         recommendations.append({
             "category": "Viva Voce & Oral Defense",
             "priority": "Medium",
@@ -135,7 +144,7 @@ def generate_course_level_recommendations(course_dict, policies=None):
             "text": f"Oral defense / viva voce is {viva:.1f}/10 (below target {viva_thresh:.0f}). Participate actively in laboratory Q&A sessions to improve technical articulation.",
         })
 
-    if ext < 16.0:
+    if course_dict.get("external_marks") is not None and ext > 0 and ext < 16.0:
         recommendations.append({
             "category": "External Exam Strategy",
             "priority": "High",

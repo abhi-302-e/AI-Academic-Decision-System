@@ -260,12 +260,12 @@ def predict_single_course_features(features_dict):
         return None
 
     features = pd.DataFrame([{
-        "assignment_marks": float(features_dict.get("assignment_marks", 0.0)),
-        "quiz_marks": float(features_dict.get("quiz_marks", 0.0)),
-        "mid_exam_marks": float(features_dict.get("mid_exam_marks", 0.0)),
-        "viva_marks": float(features_dict.get("viva_marks", 0.0)),
-        "external_marks": float(features_dict.get("external_marks", 0.0)),
-        "course_attendance": float(features_dict.get("course_attendance", 0.0)),
+        "assignment_marks": float(features_dict.get("assignment_marks") or 0.0),
+        "quiz_marks": float(features_dict.get("quiz_marks") or 0.0),
+        "mid_exam_marks": float(features_dict.get("mid_exam_marks") or 0.0),
+        "viva_marks": float(features_dict.get("viva_marks") or 0.0),
+        "external_marks": float(features_dict.get("external_marks") or 0.0),
+        "course_attendance": float(features_dict.get("course_attendance") or 0.0),
     }])
     trained_performance_model = joblib.load(course_performance_model)
     trained_risk_model = joblib.load(course_risk_model)
@@ -276,7 +276,7 @@ def predict_single_course_features(features_dict):
 
 
 def predict_registered_course(assessment):
-    """Predict from a fully graded, registered course using Admin-trained models."""
+    """Predict from a fully graded or in-progress registered course using Admin-trained models."""
     course_performance_model = MODEL_DIR / "course_performance_model.pkl"
     course_risk_model = MODEL_DIR / "course_risk_model.pkl"
     if (
@@ -286,13 +286,26 @@ def predict_registered_course(assessment):
     ):
         return None
 
+    # Handle mid marks scaling: if mid_exam_marks is None but mid_1_marks is present (15-mark scale),
+    # project to 30-mark scale so model receives correct magnitude
+    mid_val = assessment.get("mid_exam_marks")
+    if mid_val is None:
+        m1 = assessment.get("mid_1_marks")
+        m2 = assessment.get("mid_2_marks")
+        if m1 is not None and m2 is not None:
+            mid_val = float(m1) + float(m2)
+        elif m1 is not None:
+            mid_val = float(m1) * 2.0  # Proportional projection of Mid-1 to full 30-mark scale
+        else:
+            mid_val = 0.0
+
     return predict_single_course_features({
-        "assignment_marks": assessment.get("assignment_marks", 0.0),
-        "quiz_marks": assessment.get("quiz_marks", 0.0),
-        "mid_exam_marks": assessment.get("mid_exam_marks", 0.0),
-        "viva_marks": assessment.get("viva_marks", 0.0),
-        "external_marks": assessment.get("external_marks", 0.0),
-        "course_attendance": assessment.get("course_attendance", 0.0),
+        "assignment_marks": assessment.get("assignment_marks") or 0.0,
+        "quiz_marks": assessment.get("quiz_marks") or 0.0,
+        "mid_exam_marks": mid_val,
+        "viva_marks": assessment.get("viva_marks") or 0.0,
+        "external_marks": assessment.get("external_marks") or 0.0,
+        "course_attendance": assessment.get("course_attendance") or 0.0,
     })
 
 
@@ -378,17 +391,7 @@ def predict_student_comprehensive(student_id, semester=1):
         pred = predict_registered_course(a)
         if pred:
             internal_total = a.get("internal_total")
-            if internal_total is None and a.get("assignment_marks") is not None:
-                internal_total = round(
-                    float(a.get("assignment_marks") or 0)
-                    + float(a.get("quiz_marks") or 0)
-                    + float(a.get("mid_exam_marks") or 0)
-                    + float(a.get("viva_marks") or 0),
-                    2
-                )
             overall_total = a.get("overall_total")
-            if overall_total is None and internal_total is not None and a.get("external_marks") is not None:
-                overall_total = round(internal_total + float(a.get("external_marks") or 0), 2)
 
             course_results.append({
                 "course_code": a.get("course_code"),
@@ -397,6 +400,8 @@ def predict_student_comprehensive(student_id, semester=1):
                 "performance_prediction": pred["performance_prediction"],
                 "risk_level": pred["risk_level"],
                 "mid_exam_marks": a.get("mid_exam_marks"),
+                "mid_1_marks": a.get("mid_1_marks"),
+                "mid_2_marks": a.get("mid_2_marks"),
                 "assignment_marks": a.get("assignment_marks"),
                 "quiz_marks": a.get("quiz_marks"),
                 "viva_marks": a.get("viva_marks"),
@@ -413,9 +418,10 @@ def predict_student_comprehensive(student_id, semester=1):
     crit_int_thresh = float(policies.get("critical_internal_threshold", 24.0))
 
     has_att_shortage = any(float(c.get("course_attendance") or 0.0) < att_thresh for c in course_results)
+    valid_course_internals = [float(c["internal_total"]) for c in course_results if c.get("internal_total") is not None]
     avg_internal_val = (
-        sum(float(c.get("internal_total") or 0.0) for c in course_results) / len(course_results)
-        if course_results else None
+        sum(valid_course_internals) / len(valid_course_internals)
+        if valid_course_internals else None
     )
 
     if "High" in risk_votes or (has_att_shortage and "Fail" in performance_votes):
