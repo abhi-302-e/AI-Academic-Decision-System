@@ -69,7 +69,7 @@ connection.close()
 if not has_student_table:
     initialize_app_database.clear()
 
-initialize_app_database("enterprise-erp-v6-none-safe")
+initialize_app_database("enterprise-erp-v7-ai-hub-fix")
 
 role = st.session_state.get("role")
 

@@ -25,6 +25,12 @@ if str(ROOT_DIR) not in sys.path:
 from database import get_connection, get_all_students, get_student_by_roll, save_student_ai_chat_message, get_student_ai_chat_history, clear_student_ai_chat_history
 import ai_upgrades as ai
 
+session_student = dict(st.session_state.get("user_data") or st.session_state.get("user") or {})
+roll_no = session_student.get("roll_number")
+raw_student = (get_student_by_roll(roll_no) if roll_no else None) or session_student
+student = dict(raw_student) if raw_student else {}
+student_id_val = int(student.get("student_id") or 1)
+
 st.title("✨ Student AI Learning & Academic Tutor Hub (v2.0)")
 st.caption(
     "10 Advanced AI Academic Decision & Tutoring Systems · "
@@ -73,7 +79,7 @@ with tabs[0]:
     col_t1, col_t2 = st.columns([1, 2])
     with col_t1:
         st.markdown("##### ⚙️ Student Context")
-        user_name = st.text_input("Student Name", value=st.session_state.get("full_name", "Karthik E."))
+        user_name = st.text_input("Student Name", value=student.get("full_name") or st.session_state.get("full_name", "Karthik E."))
         courses = ["MA101 (Linear Algebra)", "CS101 (Programming in C)", "PH101 (Physics)", "EE101 (Electrical Sciences)"]
         selected_course = st.selectbox("Select Active Course", courses)
 
