@@ -321,8 +321,18 @@ with tab_manual:
                             st.dataframe(pd.DataFrame(res.get("logs")), use_container_width=True, hide_index=True)
                 else:
                     st.error(f"❌ Dispatch status: {res.get('message')}")
-                    if "454" in str(res.get('message', '')) or "Too many login attempts" in str(res.get('message', '')):
-                        st.warning("⏳ **Google SMTP Rate Limit Active:** Google has temporarily paused authentication for `forestnation08@gmail.com` because previous runs attempted repeated logins in a short time. Please wait 15–30 minutes without clicking dispatch for Google's security counter to expire, or update with a fresh App Password above.")
+                    msg_str = str(res.get('message', ''))
+                    if any(k in msg_str for k in ['454', 'Too many login attempts', 'Broken pipe', 'Connection unexpectedly closed', '10054']):
+                        st.warning("""
+                        ### ⏳ Google Gmail Security Cooldown Window Active
+                        **Why this happened:**
+                        Earlier runs attempted to send 500 emails by opening hundreds of separate SSL connections in a short time. Google's automated security system flagged `forestnation08@gmail.com` with **Code 454: Too many login attempts** and temporarily closed the connection (`[Errno 32] Broken pipe`).
+
+                        **Two Ways to Proceed:**
+                        1. **Wait ~15–30 Minutes:** Stop clicking dispatch and allow Google's security counter to expire. Once the cooling period is complete, click **"🔌 Test Live Connection"** in the top ribbon until it turns green (`● Authenticated`), then dispatch.
+                        2. **Use an Alternate Gmail Account / App Password (Instant):**
+                           Open the **⚙️ Manage Institutional SMTP Sender & App Password Override** expander above, enter an alternate Gmail address and fresh 16-character App Password, click **Save Credentials & Verify**, and dispatch immediately!
+                        """)
                     if res.get("logs"):
                         with st.expander("View Delivery Logs", expanded=True):
                             st.dataframe(pd.DataFrame(res.get("logs")), use_container_width=True, hide_index=True)

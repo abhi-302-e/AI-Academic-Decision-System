@@ -104,6 +104,9 @@ class ManagedSMTPSession:
         self.app_password = self.app_password or get_configured_admin_password()
         self.from_email = self.from_email or get_configured_admin_email()
 
+        if self.app_password:
+            self.app_password = str(self.app_password).strip().replace(" ", "")
+
         if not self.app_password:
             self.connect_error = "Gmail SMTP credentials missing. Check SMTP_APP_PASSWORD in secrets or admin settings."
             self.is_active = False
@@ -121,15 +124,6 @@ class ManagedSMTPSession:
             return True
         except Exception as e465:
             err465 = str(e465)
-            if "454" in err465 or "Too many login attempts" in err465:
-                self.smtp = None
-                self.is_rate_limited = True
-                self.connect_error = (
-                    "Gmail SMTP Security Rate Limit (Code 454: Too many login attempts). "
-                    "Google requires a cooling-off period (~15–30 minutes) before allowing new sign-ins."
-                )
-                self.is_active = False
-                return False
 
             # Attempt 2: Fallback to Port 587 STARTTLS
             try:
@@ -145,14 +139,23 @@ class ManagedSMTPSession:
             except Exception as e587:
                 self.smtp = None
                 err587 = str(e587)
-                if "454" in err587 or "Too many login attempts" in err587:
+
+                is_rate_limit = (
+                    any(k in err587 for k in ["454", "Too many login attempts", "Broken pipe", "10054", "Connection unexpectedly closed"])
+                    or any(k in err465 for k in ["454", "Too many login attempts", "Broken pipe", "10054", "Connection unexpectedly closed"])
+                )
+
+                if is_rate_limit:
                     self.is_rate_limited = True
                     self.connect_error = (
-                        "Gmail SMTP Security Rate Limit (Code 454: Too many login attempts). "
-                        "Google requires a cooling-off period (~15–30 minutes) before allowing new sign-ins."
+                        "Google Gmail Security Cooldown Active (Code 454: Too many login attempts). "
+                        "Google temporarily severed the connection ([Errno 32] Broken pipe) because of rapid sign-in attempts from previous runs. "
+                        "Google requires a 15–30 minute cooling period with no sign-in requests before unlocking. "
+                        "You can wait for the cooling period to complete, or use an alternate Gmail account & App Password using the settings box above."
                     )
                 else:
                     self.connect_error = f"SMTP connection failed: {err587} (Port 465: {err465})"
+
                 self.is_active = False
                 return False
 
