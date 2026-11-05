@@ -36,6 +36,7 @@ from email_service import (
     send_session_attendance_email,
     get_configured_admin_email,
     is_email_service_active,
+    ManagedSMTPSession,
 )
 import sms_service
 from sms_service import (
@@ -350,6 +351,26 @@ def dispatch_student_recommendations_and_predictions(
 
         query += " ORDER BY s.roll_number ASC"
         students = conn.execute(query, params).fetchall()
+
+        # Pre-load course assessments for all matching students in one single batch query
+        assessments_rows = conn.execute("""
+            SELECT ca.assessment_id, ca.student_id, ca.course_id, ca.assignment_marks,
+                   ca.quiz_marks, ca.mid_exam_marks, ca.mid_1_marks, ca.mid_2_marks,
+                   ca.viva_marks, ca.external_marks, c.catalog_code AS course_code,
+                   c.course_name, c.credits, sr.semester, sr.section,
+                   ROUND(COALESCE(ca.assignment_marks, 0) + COALESCE(ca.quiz_marks, 0) + COALESCE(ca.mid_exam_marks, 0) + COALESCE(ca.viva_marks, 0), 2) AS internal_total,
+                   ROUND(COALESCE(ca.assignment_marks, 0) + COALESCE(ca.quiz_marks, 0) + COALESCE(ca.mid_exam_marks, 0) + COALESCE(ca.viva_marks, 0) + COALESCE(ca.external_marks, 0), 2) AS overall_total
+            FROM course_assessments ca
+            JOIN courses c ON c.course_id = ca.course_id
+            JOIN semester_registrations sr ON sr.registration_id = ca.registration_id
+            WHERE sr.status = 'Registered'
+        """).fetchall()
+
+        from collections import defaultdict
+        student_assessments_map = defaultdict(list)
+        for ar in assessments_rows:
+            student_assessments_map[ar["student_id"]].append(dict(ar))
+
     finally:
         conn.close()
 
@@ -368,139 +389,139 @@ def dispatch_student_recommendations_and_predictions(
     sms_sent = 0
     logs = []
 
-    for idx, student_row in enumerate(students, 1):
-        s = dict(student_row)
-        stu_id = s["student_id"]
-        full_name = s["full_name"]
-        roll_no = s["roll_number"]
-        s_email = s.get("email")
-        s_phone = s.get("phone")
-        att_val = float(s.get("attendance_percentage") or 75.0)
-        cgpa_val = float(s.get("cgpa") or 7.0)
+    # Initialize persistent SMTP session once across the whole batch
+    smtp_session = None
+    if send_email_flag:
+        smtp_session = ManagedSMTPSession(timeout=10)
+        smtp_session.connect()
 
-        # Retrieve course assessments
-        assessments = get_student_course_assessments(stu_id, s.get("semester") or 1)
+    try:
+        for idx, student_row in enumerate(students, 1):
+            s = dict(student_row)
+            stu_id = s["student_id"]
+            full_name = s["full_name"]
+            roll_no = s["roll_number"]
+            s_email = s.get("email")
+            s_phone = s.get("phone")
+            att_val = float(s.get("attendance_percentage") or 75.0)
+            cgpa_val = float(s.get("cgpa") or 7.0)
 
-        # Synthesize recommendations
-        recs = []
-        if assessments:
-            for ca in assessments:
-                course_recs = generate_course_level_recommendations(ca, policies=policies)
-                for cr in course_recs:
-                    t_str = cr.get("text") if isinstance(cr, dict) else str(cr)
-                    c_code = ca.get("course_code", "Course")
-                    recs.append(f"{c_code}: {t_str}")
+            # Retrieve pre-loaded course assessments in memory
+            assessments = student_assessments_map.get(stu_id, [])
 
-        if not recs:
-            recs = [
-                "Maintain continuous class engagement and submit all weekly assignments.",
-                "Target minimum 75% attendance in all core lectures and laboratory practicals.",
-                "Attend peer-mentoring and departmental tutorial problem-solving sessions."
-            ]
+            # Synthesize recommendations
+            recs = []
+            if assessments:
+                for ca in assessments:
+                    course_recs = generate_course_level_recommendations(ca, policies=policies)
+                    for cr in course_recs:
+                        t_str = cr.get("text") if isinstance(cr, dict) else str(cr)
+                        c_code = ca.get("course_code", "Course")
+                        recs.append(f"{c_code}: {t_str}")
 
-        # Prediction synthesis
-        predicted_perf = "First Class / Good"
-        risk_level = "Low" if att_val >= 75.0 and cgpa_val >= 6.5 else ("Medium" if att_val >= 65.0 else "High")
+            if not recs:
+                recs = [
+                    "Maintain continuous class engagement and submit all weekly assignments.",
+                    "Target minimum 75% attendance in all core lectures and laboratory practicals.",
+                    "Attend peer-mentoring and departmental tutorial problem-solving sessions."
+                ]
 
-        if assessments:
-            avg_score = sum(float(a.get("overall_total") or 60.0) for a in assessments) / len(assessments)
-            if avg_score >= 75.0:
-                predicted_perf = "Distinction"
-            elif avg_score >= 50.0:
-                predicted_perf = "Pass"
-            else:
-                predicted_perf = "At-Risk / Remedial"
+            # Prediction synthesis
+            predicted_perf = "First Class / Good"
+            risk_level = "Low" if att_val >= 75.0 and cgpa_val >= 6.5 else ("Medium" if att_val >= 65.0 else "High")
 
-        xai_summary = (
-            f"Evaluated against 60/40 CIE-SEE weightage. Current attendance is {att_val:.1f}%, "
-            f"with CGPA at {cgpa_val:.2f}. "
-            f"{'Statutory attendance remediation required.' if att_val < 75.0 else 'Academic trajectory is on track.'}"
-        )
+            if assessments:
+                avg_score = sum(float(a.get("overall_total") or 60.0) for a in assessments) / len(assessments)
+                if avg_score >= 75.0:
+                    predicted_perf = "Distinction"
+                elif avg_score >= 50.0:
+                    predicted_perf = "Pass"
+                else:
+                    predicted_perf = "At-Risk / Remedial"
 
-        email_status = "Skipped"
-        sms_status = "Skipped"
-
-        # Dispatch Email
-        if send_email_flag and s_email and "@" in s_email:
-            e_res = send_student_recommendations_email(
-                to_email=s_email,
-                full_name=full_name,
-                roll_no=roll_no,
-                enrollment_no=s.get("enrollment_no") or roll_no,
-                risk_level=risk_level,
-                predicted_perf=predicted_perf,
-                cgpa=cgpa_val,
-                attendance=att_val,
-                recommendations_list=recs[:5],
-                xai_summary=xai_summary,
-                custom_note=custom_note or "",
+            xai_summary = (
+                f"Evaluated against 60/40 CIE-SEE weightage. Current attendance is {att_val:.1f}%, "
+                f"with CGPA at {cgpa_val:.2f}. "
+                f"{'Statutory attendance remediation required.' if att_val < 75.0 else 'Academic trajectory is on track.'}"
             )
-            if e_res.get("success"):
-                emails_sent += 1
-                email_status = "Delivered"
-            else:
-                email_status = e_res.get("status", "Failed")
 
-            # Persist every single email record into database communication_logs
-            try:
-                log_communication(
-                    recipient_type="Student",
-                    recipient_name=full_name,
-                    recipient_contact=s_email,
-                    channel="Email",
-                    sender_email=get_configured_admin_email(),
-                    subject=f"Academic Decision Advisory & Recommendations - {full_name} ({roll_no})",
-                    message=f"Predicted Performance: {predicted_perf} | Risk Level: {risk_level} | Attendance: {att_val:.1f}% | CIE Marks: {cgpa_val:.1f}/60 | Key Advice: {recs[0] if recs else 'Maintain attendance'}",
-                    status=email_status,
-                    error_message=e_res.get("message") if not e_res.get("success") else None
+            email_status = "Skipped"
+            sms_status = "Skipped"
+
+            # Dispatch Email via persistent session
+            if send_email_flag and s_email and "@" in s_email:
+                e_res = send_student_recommendations_email(
+                    to_email=s_email,
+                    full_name=full_name,
+                    roll_no=roll_no,
+                    enrollment_no=s.get("enrollment_no") or roll_no,
+                    risk_level=risk_level,
+                    predicted_perf=predicted_perf,
+                    cgpa=cgpa_val,
+                    attendance=att_val,
+                    recommendations_list=recs[:5],
+                    xai_summary=xai_summary,
+                    custom_note=custom_note or "",
+                    smtp_session=smtp_session,
+                    log_to_db=False,
                 )
-            except Exception as log_err:
-                print(f"Error logging email communication for {roll_no}: {log_err}")
+                if e_res.get("success"):
+                    emails_sent += 1
+                    email_status = "Delivered"
+                else:
+                    email_status = e_res.get("status", "Failed")
 
-        # Dispatch WhatsApp
-        if send_whatsapp_flag and s_phone:
-            top_rec = recs[0] if recs else "Maintain class attendance."
-            w_res = send_academic_recommendation_whatsapp(
-                phone_number=s_phone,
-                full_name=full_name,
-                roll_no=roll_no,
-                risk_level=risk_level,
-                predicted_perf=predicted_perf,
-                top_action=top_rec[:50],
-            )
-            if w_res.get("success"):
-                sms_sent += 1
-                sms_status = "Delivered"
-            else:
-                sms_status = w_res.get("status", "Failed")
+                # Persist single unified record into database communication_logs
+                try:
+                    log_communication(
+                        recipient_type="Student",
+                        recipient_name=full_name,
+                        recipient_contact=s_email,
+                        channel="Email",
+                        sender_email=get_configured_admin_email(),
+                        subject=f"Academic Decision Advisory & Recommendations - {full_name} ({roll_no})",
+                        message=f"Predicted Performance: {predicted_perf} | Risk Level: {risk_level} | Attendance: {att_val:.1f}% | CIE Marks: {cgpa_val:.1f}/60 | Key Advice: {recs[0] if recs else 'Maintain attendance'}",
+                        status=email_status,
+                        error_message=e_res.get("message") if not e_res.get("success") else None,
+                    )
+                except Exception as log_err:
+                    print(f"Error logging email communication for {roll_no}: {log_err}")
 
-            # Persist every single whatsapp record into database communication_logs
-            try:
-                log_communication(
-                    recipient_type="Student",
-                    recipient_name=full_name,
-                    recipient_contact=s_phone,
-                    channel="WhatsApp",
-                    sender_email=get_configured_admin_email(),
-                    subject=f"WhatsApp Advisory - {roll_no}",
-                    message=f"Risk: {risk_level} | Action: {top_rec}",
-                    status=sms_status,
-                    error_message=w_res.get("message") if not w_res.get("success") else None
+            # Dispatch WhatsApp
+            if send_whatsapp_flag and s_phone:
+                top_rec = recs[0] if recs else "Maintain class attendance."
+                w_res = send_academic_recommendation_whatsapp(
+                    phone_number=s_phone,
+                    full_name=full_name,
+                    roll_no=roll_no,
+                    risk_level=risk_level,
+                    predicted_perf=predicted_perf,
+                    top_action=top_rec[:50],
                 )
-            except Exception as log_err:
-                print(f"Error logging WhatsApp communication for {roll_no}: {log_err}")
+                if w_res.get("success"):
+                    sms_sent += 1
+                    sms_status = "Delivered"
+                else:
+                    sms_status = w_res.get("status", "Failed")
 
-        logs.append({
-            "roll_number": roll_no,
-            "full_name": full_name,
-            "section": s.get("section", "—"),
-            "risk": risk_level,
-            "email_status": email_status,
-            "sms_status": sms_status,
-        })
+            logs.append({
+                "roll_number": roll_no,
+                "full_name": full_name,
+                "section": s.get("section", "—"),
+                "risk": risk_level,
+                "email_status": email_status,
+                "sms_status": sms_status,
+            })
 
-        if progress_callback:
-            progress_callback(idx, total_count, f"Processed {full_name} ({roll_no})")
+            if progress_callback:
+                progress_callback(idx, total_count, f"Processed {full_name} ({roll_no}) [{emails_sent} sent]")
+
+    finally:
+        if smtp_session:
+            try:
+                smtp_session.close()
+            except Exception:
+                pass
 
     # Update dispatch logs and settings
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

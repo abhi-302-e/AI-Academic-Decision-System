@@ -61,10 +61,118 @@ def is_email_service_active():
     return bool(EMAIL_APP_PASSWORD)
 
 
-def send_email(to_email, subject, body, html_body=None, recipient_name="Student"):
+class ManagedSMTPSession:
+    """
+    Persistent, auto-reconnecting SMTP session manager for bulk / batch email dispatch.
+    Reuses an established SSL connection across all 500 students, avoiding
+    500 individual SSL handshakes, DNS timeouts, socket exhaustion, and UI freezes.
+    """
+    def __init__(self, from_email=None, app_password=None, host="smtp.gmail.com", port=465, timeout=12):
+        import time as _t
+        self._time = _t
+        self.from_email = from_email or get_configured_admin_email()
+        self.app_password = app_password or (
+            get_secret("SMTP_APP_PASSWORD") or get_secret("EMAIL_APP_PASSWORD")
+        )
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        self.smtp = None
+        self.is_active = bool(self.app_password)
+        self.connect_error = None
+        self.total_sent = 0
+        self.connection_attempts = 0
+
+    def connect(self):
+        if not self.app_password:
+            self.connect_error = "Gmail SMTP credentials missing. Check SMTP_APP_PASSWORD in secrets."
+            self.is_active = False
+            return False
+        try:
+            self.connection_attempts += 1
+            self.smtp = smtplib.SMTP_SSL(self.host, self.port, timeout=self.timeout)
+            self.smtp.login(self.from_email, self.app_password)
+            self.connect_error = None
+            self.is_active = True
+            return True
+        except Exception as e:
+            self.smtp = None
+            self.connect_error = str(e)
+            return False
+
+    def is_connected(self):
+        if self.smtp is None:
+            return False
+        try:
+            code = self.smtp.noop()[0]
+            return code == 250
+        except Exception:
+            return False
+
+    def ensure_connected(self):
+        if not self.is_active:
+            return False
+        if not self.is_connected():
+            return self.connect()
+        return True
+
+    def send_message(self, message):
+        """
+        Send EmailMessage over persistent connection.
+        If dropped, reconnects once and retries immediately.
+        """
+        if not self.is_active:
+            return False, self.connect_error or "Missing SMTP credentials"
+
+        for attempt in range(2):
+            if not self.ensure_connected():
+                return False, self.connect_error or "Could not establish SMTP connection"
+            try:
+                self.smtp.send_message(message)
+                self.total_sent += 1
+                return True, None
+            except (smtplib.SMTPServerDisconnected, smtplib.SMTPResponseException, OSError, TimeoutError) as drop_err:
+                try:
+                    if self.smtp:
+                        self.smtp.close()
+                except Exception:
+                    pass
+                self.smtp = None
+                self._time.sleep(0.3)
+                if attempt == 1:
+                    return False, f"Delivery failed after retry: {drop_err}"
+            except Exception as e:
+                return False, str(e)
+        return False, "SMTP delivery failed"
+
+    def close(self):
+        if self.smtp:
+            try:
+                self.smtp.quit()
+            except Exception:
+                pass
+            self.smtp = None
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+
+def send_email(
+    to_email,
+    subject,
+    body,
+    html_body=None,
+    recipient_name="Student",
+    smtp_session=None,
+    log_to_db=True,
+):
     """
     Send an email from the configured Gmail account using Gmail SMTP.
-    Requires SMTP_APP_PASSWORD or EMAIL_APP_PASSWORD in Streamlit Secrets.
+    Supports either an existing ManagedSMTPSession or an isolated SSL connection.
     """
     from_email = get_configured_admin_email()
 
@@ -82,23 +190,73 @@ def send_email(to_email, subject, body, html_body=None, recipient_name="Student"
     if html_body:
         message.add_alternative(html_body, subtype="html")
 
+    # If an active persistent session was provided, use it!
+    if smtp_session is not None:
+        if not getattr(smtp_session, "is_active", False):
+            error_msg = getattr(smtp_session, "connect_error", None) or (
+                "Gmail SMTP credentials are missing. Check SMTP_APP_PASSWORD in secrets."
+            )
+            if log_to_db:
+                log_communication(
+                    recipient_type="Student",
+                    recipient_name=recipient_name,
+                    recipient_contact=to_email,
+                    channel="Email",
+                    sender_email=from_email,
+                    subject=subject,
+                    message=body[:500],
+                    status="Config Required",
+                    error_message=error_msg,
+                )
+            return {
+                "success": False,
+                "status": "config_required",
+                "sender": from_email,
+                "recipient": to_email,
+                "message": f"Email not sent: {error_msg}",
+            }
+
+        success, err = smtp_session.send_message(message)
+        status_str = "Sent" if success else "Failed"
+        if log_to_db:
+            log_communication(
+                recipient_type="Student",
+                recipient_name=recipient_name,
+                recipient_contact=to_email,
+                channel="Email",
+                sender_email=from_email,
+                subject=subject,
+                message=body[:500],
+                status=status_str,
+                error_message=err,
+            )
+        return {
+            "success": success,
+            "status": "sent" if success else "failed",
+            "sender": from_email,
+            "recipient": to_email,
+            "message": f"Email successfully delivered to {to_email}" if success else f"SMTP delivery failed: {err}",
+        }
+
+    # Isolated single-email mode:
     if not app_password:
         error_msg = (
             "Gmail SMTP credentials are missing. "
             "Check SMTP_APP_PASSWORD in Streamlit Cloud Secrets."
         )
 
-        log_communication(
-            recipient_type="Student",
-            recipient_name=recipient_name,
-            recipient_contact=to_email,
-            channel="Email",
-            sender_email=from_email,
-            subject=subject,
-            message=body[:500],
-            status="Config Required",
-            error_message=error_msg,
-        )
+        if log_to_db:
+            log_communication(
+                recipient_type="Student",
+                recipient_name=recipient_name,
+                recipient_contact=to_email,
+                channel="Email",
+                sender_email=from_email,
+                subject=subject,
+                message=body[:500],
+                status="Config Required",
+                error_message=error_msg,
+            )
 
         return {
             "success": False,
@@ -109,21 +267,22 @@ def send_email(to_email, subject, body, html_body=None, recipient_name="Student"
         }
 
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=12) as smtp:
             smtp.login(from_email, app_password)
             smtp.send_message(message)
 
-        log_communication(
-            recipient_type="Student",
-            recipient_name=recipient_name,
-            recipient_contact=to_email,
-            channel="Email",
-            sender_email=from_email,
-            subject=subject,
-            message=body[:500],
-            status="Sent",
-            error_message=None,
-        )
+        if log_to_db:
+            log_communication(
+                recipient_type="Student",
+                recipient_name=recipient_name,
+                recipient_contact=to_email,
+                channel="Email",
+                sender_email=from_email,
+                subject=subject,
+                message=body[:500],
+                status="Sent",
+                error_message=None,
+            )
 
         return {
             "success": True,
@@ -136,17 +295,18 @@ def send_email(to_email, subject, body, html_body=None, recipient_name="Student"
     except Exception as error:
         err_msg = str(error)
 
-        log_communication(
-            recipient_type="Student",
-            recipient_name=recipient_name,
-            recipient_contact=to_email,
-            channel="Email",
-            sender_email=from_email,
-            subject=subject,
-            message=body[:500],
-            status="Failed",
-            error_message=err_msg,
-        )
+        if log_to_db:
+            log_communication(
+                recipient_type="Student",
+                recipient_name=recipient_name,
+                recipient_contact=to_email,
+                channel="Email",
+                sender_email=from_email,
+                subject=subject,
+                message=body[:500],
+                status="Failed",
+                error_message=err_msg,
+            )
 
         return {
             "success": False,
@@ -169,9 +329,12 @@ def send_student_recommendations_email(
     recommendations_list,
     xai_summary="",
     custom_note="",
+    smtp_session=None,
+    log_to_db=True,
 ):
     """
     Dispatch student's academic prediction, risk radar, and recommendations.
+    Supports persistent smtp_session for bulk dispatch.
     """
     subject = f"Academic Progress & AI Recommendation Advisory - {full_name} ({roll_no})"
 
@@ -293,6 +456,8 @@ Sender: {get_configured_admin_email()}
         body=plain_body,
         html_body=html_body,
         recipient_name=full_name,
+        smtp_session=smtp_session,
+        log_to_db=log_to_db,
     )
 
 
