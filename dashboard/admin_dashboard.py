@@ -808,7 +808,7 @@ elif menu in ("Train ML Models", "🔬 View Trained ML Dataset (4,000 Records)")
             # Clean ordered columns for institutional presentation
             pref_cols = [
                 "roll_number", "student_name", "section", "course_code", "course_name",
-                "course_attendance", "mid_exam_marks", "quiz_marks", "assignment_marks",
+                "course_attendance", "mid_1_marks", "mid_2_marks", "mid_exam_marks", "quiz_marks", "assignment_marks",
                 "viva_marks", "internal_total", "external_marks", "total_score",
                 "performance_label", "risk_label"
             ]
@@ -820,7 +820,9 @@ elif menu in ("Train ML Models", "🔬 View Trained ML Dataset (4,000 Records)")
                 "course_code": "Course Code",
                 "course_name": "Course Title",
                 "course_attendance": "Attendance %",
-                "mid_exam_marks": "Mid /30",
+                "mid_1_marks": "Mid-1 /15",
+                "mid_2_marks": "Mid-2 /15",
+                "mid_exam_marks": "Mid Total /30",
                 "quiz_marks": "Quiz /10",
                 "assignment_marks": "Assn /10",
                 "viva_marks": "Viva /10",

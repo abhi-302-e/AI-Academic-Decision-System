@@ -398,7 +398,7 @@ with kpi_cols[0]:
         f"{avg_internal:.1f} / 60" if avg_internal is not None else "Pending",
         delta="Passing (≥24/60)" if (avg_internal or 0) >= 24.0 else "Remedial Attention",
         delta_color="normal" if (avg_internal or 0) >= 24.0 else "inverse",
-        help="Aggregated Continuous Internal Evaluation: Mid (30) + Assignment (10) + Quiz (10) + Viva (10)",
+        help="Aggregated Continuous Internal Evaluation: Mid-1 (15) + Mid-2 (15) + Assignment (10) + Quiz (10) + Viva (10)",
     )
 with kpi_cols[1]:
     st.metric(
@@ -714,22 +714,29 @@ elif student_nav == "🎛️ What-If Grade & CIE Simulator":
 
         st.markdown("##### 🎚️ Adjust Simulated Assessment Scores")
         with st.container(border=True):
+            st.markdown("###### 📝 Mid-Term Assessments (Mid-1 /15 + Mid-2 /15 = Total Mid /30)")
+            sm1_c, sm2_c = st.columns(2)
+            with sm1_c:
+                sim_mid1 = st.slider("Simulated Mid-1 Exam (/15)", min_value=0.0, max_value=15.0, value=11.0, step=0.5)
+            with sm2_c:
+                sim_mid2 = st.slider("Simulated Mid-2 Exam (/15)", min_value=0.0, max_value=15.0, value=11.0, step=0.5)
+            sim_mid = round(sim_mid1 + sim_mid2, 2)
+            st.caption(f"📊 **Combined Mid-Term Total:** **{sim_mid:.1f} / 30.0** (Mid-1: {sim_mid1:.1f} + Mid-2: {sim_mid2:.1f})")
+
             sc1, sc2, sc3 = st.columns(3)
             with sc1:
-                sim_mid = st.slider("Simulated Mid Exam (/30)", min_value=0.0, max_value=30.0, value=22.0, step=0.5)
-            with sc2:
                 sim_quiz = st.slider("Simulated Quizzes (/10)", min_value=0.0, max_value=10.0, value=8.5, step=0.5)
-            with sc3:
+            with sc2:
                 sim_assn = st.slider("Simulated Assignment (/10)", min_value=0.0, max_value=10.0, value=9.0, step=0.5)
-
-            sc4, sc5 = st.columns(2)
-            with sc4:
+            with sc3:
                 sim_viva = st.slider("Simulated Viva Voce (/10)", min_value=0.0, max_value=10.0, value=7.5, step=0.5)
-            with sc5:
+
+            sc5_c, = st.columns(1)
+            with sc5_c:
                 sim_see = st.slider("Projected End-Sem External Exam (/40)", min_value=0.0, max_value=40.0, value=30.0, step=1.0)
 
-            total_cie = sim_mid + sim_quiz + sim_assn + sim_viva
-            total_100 = total_cie + sim_see
+            total_cie = round(sim_mid + sim_quiz + sim_assn + sim_viva, 2)
+            total_100 = round(total_cie + sim_see, 2)
 
             # Letter Grade Calculation
             if total_100 >= 90:
@@ -775,7 +782,9 @@ elif student_nav == "🎛️ What-If Grade & CIE Simulator":
                     total_100=total_100,
                     projected_grade=grade,
                     projected_gpa=gpa,
-                    standing=standing
+                    standing=standing,
+                    sim_mid_1=sim_mid1,
+                    sim_mid_2=sim_mid2
                 )
                 st.success(f"✅ Simulation scenario for {sim_course['course_code']} saved to permanent academic profile!")
                 st.rerun()
@@ -786,11 +795,20 @@ elif student_nav == "🎛️ What-If Grade & CIE Simulator":
         if not saved_sims:
             st.caption("No previously saved simulation scenarios found. Adjust sliders and click Save above.")
         else:
-            sim_rows = [
-                {
+            sim_rows = []
+            for s in saved_sims:
+                s_mid = s.get("sim_mid") or 0.0
+                s_m1 = s.get("sim_mid_1")
+                s_m2 = s.get("sim_mid_2")
+                if s_m1 is None:
+                    s_m1 = round(s_mid / 2.0, 1)
+                    s_m2 = round(s_mid - s_m1, 1)
+                sim_rows.append({
                     "Saved Date": s["created_at"],
                     "Course": f"{s['course_code']} - {s['course_name']}",
-                    "Mid /30": f"{s['sim_mid']:.1f}",
+                    "Mid-1 /15": f"{s_m1:.1f}",
+                    "Mid-2 /15": f"{s_m2:.1f}",
+                    "Mid Total /30": f"{s_mid:.1f}",
                     "Quiz /10": f"{s['sim_quiz']:.1f}",
                     "Assn /10": f"{s['sim_assn']:.1f}",
                     "Viva /10": f"{s['sim_viva']:.1f}",
@@ -798,9 +816,7 @@ elif student_nav == "🎛️ What-If Grade & CIE Simulator":
                     "Total /100": f"{s['total_100']:.1f}",
                     "Projected Grade": s["projected_grade"],
                     "Standing": s["standing"]
-                }
-                for s in saved_sims
-            ]
+                })
             st.dataframe(pd.DataFrame(sim_rows), use_container_width=True, hide_index=True)
 
 
@@ -1523,12 +1539,13 @@ elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
     st.markdown(
         """
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; font-size: 0.88rem;">
-            <b>Continuous Internal Evaluation (CIE) Framework:</b>  
-            Each course is evaluated on a continuous <b>60-mark in-semester scale</b>:  
-            • <b>30 Marks:</b> Mid-Term Examination  
-            • <b>10 Marks:</b> Formative Assignments  
-            • <b>10 Marks:</b> Continuous Quizzes  
-            • <b>10 Marks:</b> Viva Voce / Laboratory Evaluation  
+            <b>Continuous Internal Evaluation (CIE) Framework:</b><br>
+            Each course is evaluated on a continuous <b>60-mark in-semester scale</b>:<br>
+            • <b>15 Marks:</b> Mid-Term Examination 1 (Mid-1)<br>
+            • <b>15 Marks:</b> Mid-Term Examination 2 (Mid-2) <i>[Combined Mid-Term Total: 30 Marks]</i><br>
+            • <b>10 Marks:</b> Formative Assignments<br>
+            • <b>10 Marks:</b> Continuous Quizzes<br>
+            • <b>10 Marks:</b> Viva Voce / Laboratory Evaluation<br>
             <i>External summative marks and final letter grades are excluded to focus strictly on mid-semester early warning and academic intervention.</i>
         </div>
         """,
@@ -1540,7 +1557,15 @@ elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
     else:
         gradebook_rows = []
         for ca in course_assessments:
-            mid = ca.get("mid_exam_marks")
+            mid_total = ca.get("mid_exam_marks")
+            mid_1 = ca.get("mid_1_marks")
+            mid_2 = ca.get("mid_2_marks")
+            if mid_1 is None and mid_total is not None:
+                mid_1 = round(mid_total * 0.5, 1)
+                mid_2 = round(mid_total - mid_1, 1)
+            elif mid_total is None and mid_1 is not None and mid_2 is not None:
+                mid_total = round(mid_1 + mid_2, 1)
+
             assn = ca.get("assignment_marks")
             quiz = ca.get("quiz_marks")
             viva = ca.get("viva_marks")
@@ -1552,7 +1577,9 @@ elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
                 "Course Code": ca["course_code"],
                 "Course Title": ca["course_name"],
                 "Credits": ca["credits"],
-                "Mid /30": f"{mid:.1f}" if mid is not None else "—",
+                "Mid-1 /15": f"{mid_1:.1f}" if mid_1 is not None else "—",
+                "Mid-2 /15": f"{mid_2:.1f}" if mid_2 is not None else "—",
+                "Mid Total /30": f"{mid_total:.1f}" if mid_total is not None else "—",
                 "Assn /10": f"{assn:.1f}" if assn is not None else "—",
                 "Quiz /10": f"{quiz:.1f}" if quiz is not None else "—",
                 "Viva /10": f"{viva:.1f}" if viva is not None else "—",
@@ -1593,7 +1620,9 @@ elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
                                 <th style="padding: 8px; border: 1px solid #091e3a; text-align: left;">Code</th>
                                 <th style="padding: 8px; border: 1px solid #091e3a; text-align: left;">Course Title</th>
                                 <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Credits</th>
-                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Mid /30</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Mid-1 /15</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Mid-2 /15</th>
+                                <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Mid Total /30</th>
                                 <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Assn /10</th>
                                 <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Quiz /10</th>
                                 <th style="padding: 8px; border: 1px solid #091e3a; text-align: center;">Viva /10</th>
@@ -1607,7 +1636,9 @@ elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
                                 <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-family: monospace;">{r["Course Code"]}</td>
                                 <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">{r["Course Title"]}</td>
                                 <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Credits"]}</td>
-                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Mid /30"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; color: #1e3a8a; font-weight: 600;">{r["Mid-1 /15"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; color: #1e3a8a; font-weight: 600;">{r["Mid-2 /15"]}</td>
+                                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center; font-weight: 700; background: #f8fafc;">{r["Mid Total /30"]}</td>
                                 <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Assn /10"]}</td>
                                 <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Quiz /10"]}</td>
                                 <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: center;">{r["Viva /10"]}</td>
@@ -1966,7 +1997,17 @@ elif student_nav == "🧠 AI Decision Engine & XAI":
         scol1, scol2 = st.columns(2)
         with scol1:
             curr_mid = float(student.get("mid_exam_marks") or 15.0)
-            target_mid = st.slider("Target Mid-Term Exam Marks (/30)", min_value=0.0, max_value=30.0, value=min(curr_mid + 5.0, 30.0), step=1.0)
+            curr_mid1 = float(student.get("mid_1_marks") or round(curr_mid / 2.0, 1))
+            curr_mid2 = float(student.get("mid_2_marks") or round(curr_mid - curr_mid1, 1))
+
+            st.markdown("###### 📝 Target Mid-Term Marks (15 Marks + 15 Marks = 30 Marks)")
+            gm1_col, gm2_col = st.columns(2)
+            with gm1_col:
+                target_mid1 = st.slider("Target Mid 1 (/15)", min_value=0.0, max_value=15.0, value=min(curr_mid1 + 2.0, 15.0), step=0.5)
+            with gm2_col:
+                target_mid2 = st.slider("Target Mid 2 (/15)", min_value=0.0, max_value=15.0, value=min(curr_mid2 + 2.0, 15.0), step=0.5)
+            target_mid = round(target_mid1 + target_mid2, 1)
+            st.caption(f"🎯 **Combined Mid Exam Target:** **{target_mid:.1f} / 30.0** (Mid-1: {target_mid1:.1f} + Mid-2: {target_mid2:.1f})")
 
             curr_att = float(student.get("attendance_percentage") or 75.0)
             target_att = st.slider("Anticipated Future Course Attendance (%)", min_value=30.0, max_value=100.0, value=min(curr_att + 5.0, 100.0), step=1.0)

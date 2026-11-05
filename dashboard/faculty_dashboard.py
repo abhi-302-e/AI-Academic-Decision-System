@@ -180,6 +180,14 @@ if faculty_nav == "📝 Course Assessment (60/40 CIE)":
             roster_summary = []
             for s in roster:
                 mid = s.get("mid_exam_marks")
+                m1 = s.get("mid_1_marks")
+                m2 = s.get("mid_2_marks")
+                if m1 is None and mid is not None:
+                    m1 = round(mid * 0.5, 1)
+                    m2 = round(mid - m1, 1)
+                elif mid is None and m1 is not None and m2 is not None:
+                    mid = round(m1 + m2, 1)
+
                 assn = s.get("assignment_marks")
                 quiz = s.get("quiz_marks")
                 viva = s.get("viva_marks")
@@ -189,7 +197,9 @@ if faculty_nav == "📝 Course Assessment (60/40 CIE)":
                 roster_summary.append({
                     "Roll Number": s["roll_number"],
                     "Student Name": s["full_name"],
-                    "Mid /30": f"{mid:.1f}" if mid is not None else "—",
+                    "Mid-1 /15": f"{m1:.1f}" if m1 is not None else "—",
+                    "Mid-2 /15": f"{m2:.1f}" if m2 is not None else "—",
+                    "Mid Total /30": f"{mid:.1f}" if mid is not None else "—",
                     "Assn /10": f"{assn:.1f}" if assn is not None else "—",
                     "Quiz /10": f"{quiz:.1f}" if quiz is not None else "—",
                     "Viva /10": f"{viva:.1f}" if viva is not None else "—",
@@ -211,27 +221,38 @@ if faculty_nav == "📝 Course Assessment (60/40 CIE)":
 
             with st.form("course_assessment_form"):
                 fcol1, fcol2, fcol3 = st.columns(3)
+                curr_mid = float(selected_student["mid_exam_marks"]) if selected_student["mid_exam_marks"] is not None else 18.0
+                curr_m1 = float(selected_student.get("mid_1_marks") or round(curr_mid / 2.0, 1))
+                curr_m2 = float(selected_student.get("mid_2_marks") or round(curr_mid - curr_m1, 1))
+
                 with fcol1:
-                    mid_exam = st.number_input(
-                        "Mid Exam (/30)", min_value=0.0, max_value=30.0,
-                        value=float(selected_student["mid_exam_marks"]) if selected_student["mid_exam_marks"] is not None else 18.0,
+                    mid_1 = st.number_input(
+                        "Mid Exam 1 (/15)", min_value=0.0, max_value=15.0,
+                        value=curr_m1,
                         step=0.5,
                     )
-                    viva = st.number_input(
-                        "Viva Voce (/10)", min_value=0.0, max_value=10.0,
-                        value=float(selected_student["viva_marks"]) if selected_student["viva_marks"] is not None else 7.0,
+                    mid_2 = st.number_input(
+                        "Mid Exam 2 (/15)", min_value=0.0, max_value=15.0,
+                        value=curr_m2,
                         step=0.5,
                     )
+                    mid_exam = round(mid_1 + mid_2, 1)
+                    st.caption(f"📝 Total Mid Exam: **{mid_exam:.1f} / 30** (15 + 15)")
                 with fcol2:
                     assignment = st.number_input(
                         "Assignment (/10)", min_value=0.0, max_value=10.0,
                         value=float(selected_student["assignment_marks"]) if selected_student["assignment_marks"] is not None else 7.5,
                         step=0.5,
                     )
-                with fcol3:
                     quiz = st.number_input(
                         "Formative Quiz (/10)", min_value=0.0, max_value=10.0,
                         value=float(selected_student["quiz_marks"]) if selected_student["quiz_marks"] is not None else 8.0,
+                        step=0.5,
+                    )
+                with fcol3:
+                    viva = st.number_input(
+                        "Viva Voce (/10)", min_value=0.0, max_value=10.0,
+                        value=float(selected_student["viva_marks"]) if selected_student["viva_marks"] is not None else 7.0,
                         step=0.5,
                     )
                     current_int = mid_exam + assignment + quiz + viva
@@ -249,6 +270,8 @@ if faculty_nav == "📝 Course Assessment (60/40 CIE)":
                     {
                         "assignment_marks": assignment,
                         "quiz_marks": quiz,
+                        "mid_1_marks": mid_1,
+                        "mid_2_marks": mid_2,
                         "mid_exam_marks": mid_exam,
                         "viva_marks": viva,
                         "external_marks": 0.0,

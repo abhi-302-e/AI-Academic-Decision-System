@@ -1657,6 +1657,8 @@ def get_course_assessment_roster(timetable_id, faculty_id=None):
         SELECT DISTINCT s.student_id, s.roll_number, s.full_name,
                src.course_id,
                ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
+               COALESCE(ca.mid_1_marks, ROUND(ca.mid_exam_marks / 2.0, 1)) AS mid_1_marks,
+               COALESCE(ca.mid_2_marks, ROUND(ca.mid_exam_marks - ROUND(ca.mid_exam_marks / 2.0, 1), 1)) AS mid_2_marks,
                ca.viva_marks, ca.external_marks
         FROM semester_registrations sr
         JOIN student_registered_courses src ON src.registration_id = sr.registration_id
@@ -1697,7 +1699,66 @@ def get_course_attendance_percentage(student_id, course_id, section):
     return round(100 * result["present_sessions"] / result["total_sessions"], 2)
 
 
+def ensure_mid_exam_split_schema(connection=None):
+    """
+    Ensures mid_1_marks (15) and mid_2_marks (15) columns exist in
+    course_assessments, students, and student_whatif_simulations,
+    with automatic backfilling from existing mid_exam_marks (30).
+    """
+    close_after = False
+    if connection is None:
+        connection = get_connection()
+        close_after = True
+    try:
+        cursor = connection.cursor()
+        # 1. course_assessments
+        ca_cols = [c[1] for c in cursor.execute("PRAGMA table_info(course_assessments)").fetchall()]
+        if "mid_1_marks" not in ca_cols:
+            connection.execute("ALTER TABLE course_assessments ADD COLUMN mid_1_marks REAL DEFAULT NULL")
+        if "mid_2_marks" not in ca_cols:
+            connection.execute("ALTER TABLE course_assessments ADD COLUMN mid_2_marks REAL DEFAULT NULL")
+        connection.execute("""
+            UPDATE course_assessments
+            SET mid_1_marks = ROUND(mid_exam_marks / 2.0, 1),
+                mid_2_marks = ROUND(mid_exam_marks - ROUND(mid_exam_marks / 2.0, 1), 1)
+            WHERE mid_exam_marks IS NOT NULL AND (mid_1_marks IS NULL OR mid_2_marks IS NULL)
+        """)
+
+        # 2. students
+        stu_cols = [c[1] for c in cursor.execute("PRAGMA table_info(students)").fetchall()]
+        if "mid_1_marks" not in stu_cols:
+            connection.execute("ALTER TABLE students ADD COLUMN mid_1_marks REAL DEFAULT 0")
+        if "mid_2_marks" not in stu_cols:
+            connection.execute("ALTER TABLE students ADD COLUMN mid_2_marks REAL DEFAULT 0")
+        connection.execute("""
+            UPDATE students
+            SET mid_1_marks = ROUND(mid_exam_marks / 2.0, 1),
+                mid_2_marks = ROUND(mid_exam_marks - ROUND(mid_exam_marks / 2.0, 1), 1)
+            WHERE mid_exam_marks > 0 AND (mid_1_marks IS NULL OR mid_1_marks = 0)
+        """)
+
+        # 3. student_whatif_simulations
+        sim_cols = [c[1] for c in cursor.execute("PRAGMA table_info(student_whatif_simulations)").fetchall()]
+        if "sim_mid_1" not in sim_cols:
+            connection.execute("ALTER TABLE student_whatif_simulations ADD COLUMN sim_mid_1 REAL")
+        if "sim_mid_2" not in sim_cols:
+            connection.execute("ALTER TABLE student_whatif_simulations ADD COLUMN sim_mid_2 REAL")
+        connection.execute("""
+            UPDATE student_whatif_simulations
+            SET sim_mid_1 = ROUND(sim_mid / 2.0, 1),
+                sim_mid_2 = ROUND(sim_mid - ROUND(sim_mid / 2.0, 1), 1)
+            WHERE sim_mid IS NOT NULL AND (sim_mid_1 IS NULL OR sim_mid_2 IS NULL)
+        """)
+        connection.commit()
+    except Exception as e:
+        print(f"Error ensuring mid exam split schema: {e}")
+    finally:
+        if close_after:
+            connection.close()
+
+
 def save_course_assessment(timetable_id, faculty_id, student_id, scores):
+    ensure_mid_exam_split_schema()
     limits = {
         "assignment_marks": (0, 10),
         "quiz_marks": (0, 10),
@@ -1705,10 +1766,32 @@ def save_course_assessment(timetable_id, faculty_id, student_id, scores):
         "viva_marks": (0, 10),
         "external_marks": (0, 40),
     }
+    scores_copy = dict(scores)
+    # Check if mid_1_marks and mid_2_marks were passed (15 marks + 15 marks)
+    if "mid_1_marks" in scores_copy and "mid_2_marks" in scores_copy and scores_copy["mid_1_marks"] is not None and scores_copy["mid_2_marks"] is not None:
+        try:
+            m1 = float(scores_copy["mid_1_marks"])
+            m2 = float(scores_copy["mid_2_marks"])
+        except (TypeError, ValueError):
+            return False, "Mid 1 and Mid 2 marks must be valid numbers."
+        if not (0 <= m1 <= 15 and 0 <= m2 <= 15):
+            return False, "Mid 1 and Mid 2 marks must each be between 0 and 15 marks."
+        scores_copy["mid_exam_marks"] = round(m1 + m2, 1)
+        normalized_m1 = m1
+        normalized_m2 = m2
+    else:
+        try:
+            m_tot = float(scores_copy.get("mid_exam_marks", 0))
+            normalized_m1 = round(m_tot / 2.0, 1)
+            normalized_m2 = round(m_tot - normalized_m1, 1)
+        except (TypeError, ValueError):
+            normalized_m1 = 0.0
+            normalized_m2 = 0.0
+
     try:
-        normalized_scores = {key: float(scores[key]) for key in limits}
+        normalized_scores = {key: float(scores_copy[key]) for key in limits}
     except (KeyError, TypeError, ValueError):
-        return False, "Enter all five course assessment components (Mid /30, Assignment /10, Quiz /10, Viva /10, External /40)."
+        return False, "Enter all required course assessment components (Mid 1 /15, Mid 2 /15, Assn /10, Quiz /10, Viva /10, SEE /40)."
     if any(not low <= normalized_scores[key] <= high for key, (low, high) in limits.items()):
         return False, "Marks exceed permitted range for one or more components."
 
@@ -1751,15 +1834,17 @@ def save_course_assessment(timetable_id, faculty_id, student_id, scores):
             """
             INSERT INTO course_assessments (
                 student_id, registration_id, course_id, faculty_id,
-                assignment_marks, quiz_marks, mid_exam_marks, viva_marks,
+                assignment_marks, quiz_marks, mid_exam_marks, mid_1_marks, mid_2_marks, viva_marks,
                 external_marks, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(student_id, registration_id, course_id) DO UPDATE SET
                 faculty_id = excluded.faculty_id,
                 assignment_marks = excluded.assignment_marks,
                 quiz_marks = excluded.quiz_marks,
                 mid_exam_marks = excluded.mid_exam_marks,
+                mid_1_marks = excluded.mid_1_marks,
+                mid_2_marks = excluded.mid_2_marks,
                 viva_marks = excluded.viva_marks,
                 external_marks = excluded.external_marks,
                 updated_at = CURRENT_TIMESTAMP
@@ -1768,6 +1853,7 @@ def save_course_assessment(timetable_id, faculty_id, student_id, scores):
                 student_id, registration["registration_id"], registration["course_id"],
                 faculty_id, normalized_scores["assignment_marks"],
                 normalized_scores["quiz_marks"], normalized_scores["mid_exam_marks"],
+                normalized_m1, normalized_m2,
                 normalized_scores["viva_marks"], normalized_scores["external_marks"],
             )
         )
@@ -1809,6 +1895,8 @@ def get_student_course_assessments(student_id, semester=None):
     query = """
         SELECT ca.assessment_id, ca.course_id, ca.registration_id,
                ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
+               COALESCE(ca.mid_1_marks, ROUND(ca.mid_exam_marks / 2.0, 1)) AS mid_1_marks,
+               COALESCE(ca.mid_2_marks, ROUND(ca.mid_exam_marks - ROUND(ca.mid_exam_marks / 2.0, 1), 1)) AS mid_2_marks,
                ca.viva_marks, ca.external_marks, c.catalog_code AS course_code,
                c.course_name, c.credits, c.course_type, sr.semester, sr.academic_year,
                sr.section, sc.year,
@@ -1858,6 +1946,8 @@ def get_course_model_training_data():
         """
         SELECT s.roll_number, s.full_name AS student_name,
                ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
+               COALESCE(ca.mid_1_marks, ROUND(ca.mid_exam_marks / 2.0, 1)) AS mid_1_marks,
+               COALESCE(ca.mid_2_marks, ROUND(ca.mid_exam_marks - ROUND(ca.mid_exam_marks / 2.0, 1), 1)) AS mid_2_marks,
                ca.viva_marks, ca.external_marks,
                ROUND(ca.assignment_marks + ca.quiz_marks + ca.mid_exam_marks
                      + ca.viva_marks, 2) AS internal_total,
@@ -3042,19 +3132,25 @@ def save_student_whatif_simulation(student_id: int, course_id: int, course_code:
                                    course_name: str, sim_mid: float, sim_quiz: float,
                                    sim_assn: float, sim_viva: float, sim_see: float,
                                    total_cie: float, total_100: float, projected_grade: str,
-                                   projected_gpa: float, standing: str) -> int:
+                                   projected_gpa: float, standing: str,
+                                   sim_mid_1: float = None, sim_mid_2: float = None) -> int:
     ensure_comprehensive_storage_tables()
+    ensure_mid_exam_split_schema()
+    if sim_mid_1 is None:
+        sim_mid_1 = round(sim_mid / 2.0, 1)
+    if sim_mid_2 is None:
+        sim_mid_2 = round(sim_mid - sim_mid_1, 1)
     conn = get_connection()
     try:
         cur = conn.execute(
             """
             INSERT INTO student_whatif_simulations
-            (student_id, course_id, course_code, course_name, sim_mid, sim_quiz,
+            (student_id, course_id, course_code, course_name, sim_mid, sim_mid_1, sim_mid_2, sim_quiz,
              sim_assn, sim_viva, sim_see, total_cie, total_100, projected_grade,
              projected_gpa, standing)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (student_id, course_id, course_code, course_name, sim_mid, sim_quiz,
+            (student_id, course_id, course_code, course_name, sim_mid, sim_mid_1, sim_mid_2, sim_quiz,
              sim_assn, sim_viva, sim_see, total_cie, total_100, projected_grade,
              projected_gpa, standing)
         )

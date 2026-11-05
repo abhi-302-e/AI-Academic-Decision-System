@@ -612,12 +612,18 @@ def simulate_student_academic_outcomes(
     target_assign,
     target_study_hours,
     policies=None,
+    target_mid_1=None,
+    target_mid_2=None,
 ):
     """
     Simulate academic performance and risk under hypothetical score/attendance conditions.
     """
     sim_data = dict(base_student_data)
+    if target_mid_1 is not None and target_mid_2 is not None:
+        target_mid = float(target_mid_1) + float(target_mid_2)
     sim_data["mid_exam_marks"] = float(target_mid)
+    sim_data["mid_1_marks"] = float(target_mid_1) if target_mid_1 is not None else round(float(target_mid) / 2.0, 1)
+    sim_data["mid_2_marks"] = float(target_mid_2) if target_mid_2 is not None else round(float(target_mid) - sim_data["mid_1_marks"], 1)
     sim_data["attendance_percentage"] = float(target_attendance)
     sim_data["quiz_marks"] = float(target_quiz)
     sim_data["assignment_marks"] = float(target_assign)
