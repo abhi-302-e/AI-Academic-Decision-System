@@ -182,7 +182,9 @@ if faculty_nav == "📝 Course Assessment (60/40 CIE)":
                 mid = s.get("mid_exam_marks")
                 m1 = s.get("mid_1_marks")
                 m2 = s.get("mid_2_marks")
-                if m1 is None and mid is not None:
+                if m2 is None:
+                    mid = None
+                elif m1 is None and mid is not None:
                     m1 = round(mid * 0.5, 1)
                     m2 = round(mid - m1, 1)
                 elif mid is None and m1 is not None and m2 is not None:
@@ -191,8 +193,8 @@ if faculty_nav == "📝 Course Assessment (60/40 CIE)":
                 assn = s.get("assignment_marks")
                 quiz = s.get("quiz_marks")
                 viva = s.get("viva_marks")
-                internal = (mid or 0) + (assn or 0) + (quiz or 0) + (viva or 0) if mid is not None else None
-                status = "On Track" if (internal or 0) >= 30 else ("Borderline" if (internal or 0) >= 24 else "Remedial Needed") if internal is not None else "Pending"
+                internal = (mid + assn + quiz + viva) if (mid is not None and assn is not None and quiz is not None and viva is not None) else None
+                status = ("On Track" if internal >= 30 else ("Borderline" if internal >= 24 else "Remedial Needed")) if internal is not None else "Pending"
                 
                 roster_summary.append({
                     "Roll Number": s["roll_number"],

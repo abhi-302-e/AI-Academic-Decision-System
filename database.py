@@ -1657,8 +1657,7 @@ def get_course_assessment_roster(timetable_id, faculty_id=None):
         SELECT DISTINCT s.student_id, s.roll_number, s.full_name,
                src.course_id,
                ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
-               COALESCE(ca.mid_1_marks, ROUND(ca.mid_exam_marks / 2.0, 1)) AS mid_1_marks,
-               COALESCE(ca.mid_2_marks, ROUND(ca.mid_exam_marks - ROUND(ca.mid_exam_marks / 2.0, 1), 1)) AS mid_2_marks,
+               ca.mid_1_marks, ca.mid_2_marks,
                ca.viva_marks, ca.external_marks
         FROM semester_registrations sr
         JOIN student_registered_courses src ON src.registration_id = sr.registration_id
@@ -1717,25 +1716,13 @@ def ensure_mid_exam_split_schema(connection=None):
             connection.execute("ALTER TABLE course_assessments ADD COLUMN mid_1_marks REAL DEFAULT NULL")
         if "mid_2_marks" not in ca_cols:
             connection.execute("ALTER TABLE course_assessments ADD COLUMN mid_2_marks REAL DEFAULT NULL")
-        connection.execute("""
-            UPDATE course_assessments
-            SET mid_1_marks = ROUND(mid_exam_marks / 2.0, 1),
-                mid_2_marks = ROUND(mid_exam_marks - ROUND(mid_exam_marks / 2.0, 1), 1)
-            WHERE mid_exam_marks IS NOT NULL AND (mid_1_marks IS NULL OR mid_2_marks IS NULL)
-        """)
 
         # 2. students
         stu_cols = [c[1] for c in cursor.execute("PRAGMA table_info(students)").fetchall()]
         if "mid_1_marks" not in stu_cols:
-            connection.execute("ALTER TABLE students ADD COLUMN mid_1_marks REAL DEFAULT 0")
+            connection.execute("ALTER TABLE students ADD COLUMN mid_1_marks REAL DEFAULT NULL")
         if "mid_2_marks" not in stu_cols:
-            connection.execute("ALTER TABLE students ADD COLUMN mid_2_marks REAL DEFAULT 0")
-        connection.execute("""
-            UPDATE students
-            SET mid_1_marks = ROUND(mid_exam_marks / 2.0, 1),
-                mid_2_marks = ROUND(mid_exam_marks - ROUND(mid_exam_marks / 2.0, 1), 1)
-            WHERE mid_exam_marks > 0 AND (mid_1_marks IS NULL OR mid_1_marks = 0)
-        """)
+            connection.execute("ALTER TABLE students ADD COLUMN mid_2_marks REAL DEFAULT NULL")
 
         # 3. student_whatif_simulations
         sim_cols = [c[1] for c in cursor.execute("PRAGMA table_info(student_whatif_simulations)").fetchall()]
@@ -1895,8 +1882,7 @@ def get_student_course_assessments(student_id, semester=None):
     query = """
         SELECT ca.assessment_id, ca.course_id, ca.registration_id,
                ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
-               COALESCE(ca.mid_1_marks, ROUND(ca.mid_exam_marks / 2.0, 1)) AS mid_1_marks,
-               COALESCE(ca.mid_2_marks, ROUND(ca.mid_exam_marks - ROUND(ca.mid_exam_marks / 2.0, 1), 1)) AS mid_2_marks,
+               ca.mid_1_marks, ca.mid_2_marks,
                ca.viva_marks, ca.external_marks, c.catalog_code AS course_code,
                c.course_name, c.credits, c.course_type, sr.semester, sr.academic_year,
                sr.section, sc.year,

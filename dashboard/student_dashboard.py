@@ -396,8 +396,8 @@ with kpi_cols[0]:
     st.metric(
         "Continuous Internal (CIE)",
         f"{avg_internal:.1f} / 60" if avg_internal is not None else "Pending",
-        delta="Passing (≥24/60)" if (avg_internal or 0) >= 24.0 else "Remedial Attention",
-        delta_color="normal" if (avg_internal or 0) >= 24.0 else "inverse",
+        delta="Passing (≥24/60)" if (avg_internal is not None and avg_internal >= 24.0) else ("In-Progress" if avg_internal is None else "Remedial Attention"),
+        delta_color="normal" if (avg_internal is not None and avg_internal >= 24.0) or avg_internal is None else "inverse",
         help="Aggregated Continuous Internal Evaluation: Mid-1 (15) + Mid-2 (15) + Assignment (10) + Quiz (10) + Viva (10)",
     )
 with kpi_cols[1]:
@@ -408,7 +408,7 @@ with kpi_cols[1]:
         delta_color="normal" if overall_attendance >= policy_att_thresh else "inverse",
     )
 with kpi_cols[2]:
-    cie_standing = "Good Standing" if (avg_internal or 0) >= 30 and overall_attendance >= policy_att_thresh else ("Remedial Watch" if (avg_internal or 0) >= 24 else "Critical Intervention")
+    cie_standing = ("Good Standing" if avg_internal >= 30 and overall_attendance >= policy_att_thresh else ("Remedial Watch" if avg_internal >= 24 else "Critical Intervention")) if avg_internal is not None else ("Good Standing (Mid-1 & Assn Posted)" if overall_attendance >= policy_att_thresh else "Attendance Remediation")
     st.metric(
         "CIE Standing",
         cie_standing,
@@ -1560,7 +1560,9 @@ elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
             mid_total = ca.get("mid_exam_marks")
             mid_1 = ca.get("mid_1_marks")
             mid_2 = ca.get("mid_2_marks")
-            if mid_1 is None and mid_total is not None:
+            if mid_2 is None:
+                mid_total = None
+            elif mid_1 is None and mid_total is not None:
                 mid_1 = round(mid_total * 0.5, 1)
                 mid_2 = round(mid_total - mid_1, 1)
             elif mid_total is None and mid_1 is not None and mid_2 is not None:
@@ -1571,7 +1573,10 @@ elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
             viva = ca.get("viva_marks")
             internal = ca.get("internal_total")
 
-            cie_status = "Pass (≥24)" if (internal or 0) >= 24 else "Remedial Needed (<24)"
+            if internal is not None:
+                cie_status = "Pass (≥24)" if internal >= 24 else "Remedial Needed (<24)"
+            else:
+                cie_status = "In-Progress (Mid-1 & Assn Posted)"
 
             gradebook_rows.append({
                 "Course Code": ca["course_code"],
@@ -1651,7 +1656,7 @@ elif student_nav == "📊 Continuous Internal Evaluation (CIE /60)":
 
                     <div style="display: flex; justify-content: space-between; align-items: center; border-top: 2px solid #091e3a; padding-top: 1rem; margin-top: 1rem;">
                         <div>
-                            <div style="font-size: 1.1rem; font-weight: 800;">Continuous Internal Evaluation (CIE) Average: {avg_internal:.1f} / 60.0</div>
+                            <div style="font-size: 1.1rem; font-weight: 800;">Continuous Internal Evaluation (CIE) Average: {f'{avg_internal:.1f} / 60.0' if avg_internal is not None else 'Pending (In-Progress)'}</div>
                             <div style="font-size: 0.9rem; color: #166534; font-weight: 700; margin-top: 0.2rem;">Advisory Standing: {overall_perf.upper()}</div>
                             <div style="font-size: 0.8rem; color: #64748b; margin-top: 0.2rem;">In-Semester Proactive Evaluation Model (Grades & CGPA Removed)</div>
                         </div>
