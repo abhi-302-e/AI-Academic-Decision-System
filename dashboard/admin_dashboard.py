@@ -330,8 +330,11 @@ if menu == "📊 Executive Cockpit & KPIs":
 
     total_stu = len(students_df_all)
     total_fac = len(faculty_list_all)
-    avg_att = float(students_df_all["attendance_percentage"].dropna().mean()) if "attendance_percentage" in students_df_all else 84.2
-    avg_cie = float(students_df_all["internal_marks"].dropna().mean()) if "internal_marks" in students_df_all else 38.6
+    valid_att = students_df_all["attendance_percentage"].dropna() if "attendance_percentage" in students_df_all else pd.Series(dtype=float)
+    avg_att = float(valid_att.mean()) if not valid_att.empty and not pd.isna(valid_att.mean()) else 84.2
+    
+    valid_cie = students_df_all["internal_marks"].dropna() if "internal_marks" in students_df_all else pd.Series(dtype=float)
+    cie_metric_str = f"{float(valid_cie.mean()):.1f} / 60.0" if not valid_cie.empty and not pd.isna(valid_cie.mean()) else "In-Progress (Mid-1 + Assn)"
     shortage_count = int(len(students_df_all[students_df_all["attendance_percentage"] < 75.0])) if "attendance_percentage" in students_df_all else 0
 
     # Top Row 4 KPI Cards
@@ -350,7 +353,7 @@ if menu == "📊 Executive Cockpit & KPIs":
     st.markdown("##### ⚖️ Academic Standing & Continuous Internal Evaluation (CIE /60)")
     r1, r2, r3, r4 = st.columns(4)
     with r1:
-        st.metric("Cohort Average CIE", f"{avg_cie:.1f} / 60.0", "In-Semester Pure Evaluation")
+        st.metric("Cohort Average CIE", cie_metric_str, "In-Semester Pure Evaluation")
     with r2:
         st.metric("Good Academic Standing", "382 Students", "76.4% Low Risk Category")
     with r3:
@@ -446,11 +449,13 @@ elif menu == "🎓 Student Lifecycle & Records":
                 with kpi2:
                     st.metric("Departments", students_df["department"].nunique() if "department" in students_df else 0)
                 with kpi3:
-                    avg_cie = float(students_df["internal_marks"].dropna().mean()) if "internal_marks" in students_df else 0.0
-                    st.metric("Cohort Avg CIE", f"{avg_cie:.1f} / 60")
+                    valid_cie_m = students_df["internal_marks"].dropna() if "internal_marks" in students_df else pd.Series(dtype=float)
+                    cie_str_m = f"{float(valid_cie_m.mean()):.1f} / 60" if not valid_cie_m.empty and not pd.isna(valid_cie_m.mean()) else "In-Progress"
+                    st.metric("Cohort Avg CIE", cie_str_m)
                 with kpi4:
-                    avg_att = float(students_df["attendance_percentage"].dropna().mean()) if "attendance_percentage" in students_df else 0.0
-                    st.metric("Cohort Attendance", f"{avg_att:.1f}%")
+                    valid_att_m = students_df["attendance_percentage"].dropna() if "attendance_percentage" in students_df else pd.Series(dtype=float)
+                    avg_att_m = float(valid_att_m.mean()) if not valid_att_m.empty and not pd.isna(valid_att_m.mean()) else 84.2
+                    st.metric("Cohort Attendance", f"{avg_att_m:.1f}%")
                 with kpi5:
                     shortage_count = int(len(students_df[students_df["attendance_percentage"] < 75.0])) if "attendance_percentage" in students_df else 0
                     st.metric(
@@ -503,7 +508,7 @@ elif menu == "🎓 Student Lifecycle & Records":
                     st.write(f"Showing **{len(filtered_df):,}** of **{len(students_df):,}** students")
 
                     # Display table
-                    display_cols = ["roll_number", "full_name", "department", "current_year", "semester", "section", "attendance_percentage", "internal_marks"]
+                    display_cols = ["roll_number", "full_name", "department", "current_year", "semester", "section", "attendance_percentage", "mid_1_marks", "assignment_marks"]
                     display_labels = {
                         "roll_number": "Roll No",
                         "full_name": "Full Name",
@@ -512,8 +517,12 @@ elif menu == "🎓 Student Lifecycle & Records":
                         "semester": "Sem",
                         "section": "Sec",
                         "attendance_percentage": "Attendance %",
+                        "mid_1_marks": "Mid-1 (/15)",
+                        "assignment_marks": "Assignment (/10)",
                         "internal_marks": "CIE Internal (/60)",
                     }
+                    if "internal_marks" in filtered_df.columns and not filtered_df["internal_marks"].dropna().empty:
+                        display_cols.append("internal_marks")
                     avail_cols = [c for c in display_cols if c in filtered_df.columns]
                     styled_df = filtered_df[avail_cols].rename(columns=display_labels)
                     st.dataframe(styled_df, use_container_width=True, hide_index=True)
@@ -591,12 +600,24 @@ elif menu == "🎓 Student Lifecycle & Records":
                         with st.container(border=True):
                             st.markdown("###### 📊 Continuous Internal Evaluation (CIE) Standing")
                             m_att = float(student_rec.get("attendance_percentage") or 0.0)
-                            m_int = float(student_rec.get("internal_marks") or 0.0)
+                            m_int_raw = student_rec.get("internal_marks")
+                            m_mid1 = student_rec.get("mid_1_marks")
+                            m_assn = student_rec.get("assignment_marks")
+
+                            if m_int_raw is not None:
+                                m_int_val = float(m_int_raw)
+                                cie_status_label = "Good Standing" if m_int_val >= 30 and m_att >= 75 else ("Academic Watch" if m_att >= 65 else "Critical Risk")
+                                cie_delta = "Passing (≥24/60)" if m_int_val >= 24.0 else "Remedial Attention"
+                                cie_metric_val = f"{m_int_val:.1f} / 60"
+                            else:
+                                cie_status_label = "Active (In-Semester)" if m_att >= 75 else "Attendance Shortage"
+                                cie_delta = "In-Progress Pure CIE"
+                                cie_metric_val = f"In-Progress (Mid-1: {float(m_mid1):.1f})" if m_mid1 is not None else "In-Progress"
 
                             ac1, ac2, ac3 = st.columns(3)
-                            ac1.metric("Continuous Internal (CIE)", f"{m_int:.1f} / 60", delta="Passing (≥24/60)" if m_int >= 24.0 else "Remedial Attention", delta_color="normal" if m_int >= 24.0 else "inverse")
+                            ac1.metric("Continuous Internal (CIE)", cie_metric_val, delta=cie_delta, delta_color="normal" if m_att >= 75.0 else "inverse")
                             ac2.metric("Overall Attendance", f"{m_att:.1f}%", delta="Compliant (≥75%)" if m_att >= 75.0 else "⚠️ Shortage (<75%)", delta_color="normal" if m_att >= 75.0 else "inverse")
-                            ac3.metric("Standing Status", "Good Standing" if m_int >= 30 and m_att >= 75 else ("Academic Watch" if m_att >= 65 else "Critical Risk"))
+                            ac3.metric("Standing Status", cie_status_label)
 
                         # Registered Courses & Course Assessments
                         stu_courses = [dict(c) for c in (get_student_registered_courses(stu_id, stu_sem) or [])]
@@ -606,24 +627,33 @@ elif menu == "🎓 Student Lifecycle & Records":
                             st.markdown("###### 📚 Course-by-Course Assessment Ledger (Continuous Internal Evaluation)")
                             course_rows = []
                             for ca in stu_assessments:
-                                mid = ca.get("mid_exam_marks")
+                                mid1 = ca.get("mid_1_marks")
+                                mid2 = ca.get("mid_2_marks")
                                 assn = ca.get("assignment_marks")
                                 quiz = ca.get("quiz_marks")
                                 viva = ca.get("viva_marks")
                                 internal = ca.get("internal_total")
                                 att = ca.get("course_attendance")
-                                cie_stat = "Pass (≥24)" if (internal or 0) >= 24.0 else "Remedial Needed (<24)"
+
+                                if internal is not None:
+                                    cie_stat = "Pass (≥24)" if float(internal) >= 24.0 else "In-Progress / Remedial"
+                                    cie_val_str = f"{float(internal):.1f} / 60"
+                                else:
+                                    cie_stat = "In Progress"
+                                    cie_val_str = "In Progress"
+
                                 course_rows.append({
                                     "Course Code": ca.get("course_code", "—"),
                                     "Course Name": ca.get("course_name", "—"),
                                     "Credits": ca.get("credits", 3),
-                                    "Mid /30": f"{mid:.1f}" if mid is not None else "—",
-                                    "Assn /10": f"{assn:.1f}" if assn is not None else "—",
-                                    "Quiz /10": f"{quiz:.1f}" if quiz is not None else "—",
-                                    "Viva /10": f"{viva:.1f}" if viva is not None else "—",
-                                    "CIE /60": f"{internal:.1f}" if internal is not None else "—",
+                                    "Mid-1 /15": f"{float(mid1):.1f}" if mid1 is not None else "Pending",
+                                    "Mid-2 /15": f"{float(mid2):.1f}" if mid2 is not None else "Pending",
+                                    "Assn /10": f"{float(assn):.1f}" if assn is not None else "Pending",
+                                    "Quiz /10": f"{float(quiz):.1f}" if quiz is not None else "Pending",
+                                    "Viva /10": f"{float(viva):.1f}" if viva is not None else "Pending",
+                                    "CIE Total": cie_val_str,
                                     "CIE Status": cie_stat,
-                                    "Attendance": f"{att:.1f}%" if att is not None else "—",
+                                    "Attendance": f"{float(att):.1f}%" if att is not None else "—",
                                     "Faculty Evaluator": ca.get("faculty_name", "Assigned Faculty"),
                                 })
                             st.dataframe(pd.DataFrame(course_rows), use_container_width=True, hide_index=True)
@@ -677,199 +707,187 @@ elif menu == "🎓 Student Lifecycle & Records":
 
 
     with tab_stu_add:
+        st.markdown("#### ➕ Enroll New Student into University Roster")
+        st.caption("Register a new student with complete academic identity, section allocation, and access credentials.")
 
-            st.subheader("Add New Student")
+        with st.form("form_add_new_student", clear_on_submit=False):
+            col_a1, col_a2 = st.columns(2)
+            with col_a1:
+                full_name = st.text_input("Full Name *", placeholder="e.g. Rahul Sharma")
+                roll_number = st.text_input("University Roll Number *", placeholder="e.g. 26STU0501")
+                dept_choices = [
+                    "Computer Science and Engineering",
+                    "Artificial Intelligence and Machine Learning",
+                    "AI and Data Science",
+                    "Information Technology",
+                    "Mathematics & Computing",
+                ]
+                department = st.selectbox("Academic Department *", dept_choices)
+                admission_year = st.number_input("Admission Year", min_value=2020, max_value=2030, value=2026)
+                current_year = st.selectbox("Current Year *", [1, 2, 3, 4], index=0)
 
-            full_name = st.text_input("Full Name")
-            roll_number = st.text_input("Roll Number")
-            department = st.text_input("Department")
-            semester = st.number_input("Semester", 1, 8)
-            email = st.text_input("Email")
-            phone = st.text_input("Phone")
-            gender = st.selectbox(
-            "Gender",
-            ["Male", "Female", "Other"]
-        )
-            password = st.text_input("Password", type="password")
+            with col_a2:
+                semester = st.selectbox("Enrolled Semester *", list(range(1, 9)), index=0)
+                section = st.selectbox("Assigned Section *", list("ABCDEFGHIJ"), index=0)
+                gender = st.selectbox("Gender *", ["Male", "Female", "Other"])
+                email = st.text_input("Institutional Email *", placeholder="e.g. rahul.sharma@ifheindia.org")
+                phone = st.text_input("Mobile Phone", placeholder="e.g. +91 9876543210")
+                password = st.text_input("Initial Temporary Password *", type="password")
 
-            if st.button("Add Student"):
+            btn_enroll = st.form_submit_button("🎓 Complete Student Enrollment", type="primary", use_container_width=True)
 
-                add_student(
-                    roll_number,
-                    full_name,
+        if btn_enroll:
+            if not full_name.strip() or not roll_number.strip() or not email.strip() or not password:
+                st.error("Please fill in all mandatory fields (Name, Roll No, Email, Password).")
+            else:
+                success = add_student(
+                    roll_number.strip(),
+                    full_name.strip(),
                     gender,
                     department,
                     semester,
-                    email,
-                    phone,
-                    password
+                    email.strip(),
+                    phone.strip(),
+                    password,
+                    admission_year=int(admission_year),
+                    current_year=int(current_year),
+                    section=section
                 )
-
-                st.success("Student Added Successfully.")
-
-            st.divider()
-
-            st.subheader("🎓 Student Management")
-
-            if st.button(
-                "👨‍🎓 Student Registration Approvals",
-                use_container_width=True
-            ):
-                st.switch_page("dashboard/student_approvals.py")
-
-        # ==========================================================
-        # ADD FACULTY
-        # ==========================================================
-
-
+                if success:
+                    st.success(f"Student {full_name} ({roll_number}) enrolled successfully in Section {section}!")
+                    st.rerun()
+                else:
+                    st.error("Could not enroll student. Ensure Roll Number or Email is unique.")
 
     with tab_stu_upd:
-            st.subheader("Update Student")
+        st.markdown("#### ✏️ Edit Student Profile & Academic Allocation")
+        st.caption("Update personal credentials, department, year, semester, section, and contact information.")
 
-            roll_number = st.text_input("Enter Roll Number")
+        upd_search_roll = st.text_input("Enter Roll Number to Edit", placeholder="e.g. 26STU0001", key="upd_stu_search_input").strip()
+        if st.button("🔍 Find Student Record", key="btn_find_stu_upd"):
+            stu_found = get_student_by_roll(upd_search_roll)
+            if stu_found:
+                st.session_state.edit_student_rec = stu_found
+            else:
+                st.error(f"Student with roll number '{upd_search_roll}' not found.")
 
-            if st.button("Search Student"):
+        if "edit_student_rec" in st.session_state and st.session_state.edit_student_rec:
+            estudent = st.session_state.edit_student_rec
+            st.divider()
+            with st.form("form_edit_student_details"):
+                st.markdown(f"##### Editing: **{estudent['full_name']}** ({estudent['roll_number']})")
+                u_col1, u_col2 = st.columns(2)
+                with u_col1:
+                    u_name = st.text_input("Full Name", value=estudent.get("full_name", ""))
+                    u_gender = st.selectbox("Gender", ["Male", "Female", "Other"], index=["Male", "Female", "Other"].index(estudent.get("gender", "Male")) if estudent.get("gender") in ["Male", "Female", "Other"] else 0)
+                    dept_opts = [
+                        "Computer Science and Engineering",
+                        "Artificial Intelligence and Machine Learning",
+                        "AI and Data Science",
+                        "Information Technology",
+                        "Mathematics & Computing",
+                    ]
+                    if estudent.get("department") and estudent["department"] not in dept_opts:
+                        dept_opts.append(estudent["department"])
+                    u_dept = st.selectbox("Department", dept_opts, index=dept_opts.index(estudent.get("department", dept_opts[0])))
+                    u_year = st.selectbox("Current Year", [1, 2, 3, 4], index=max(0, min(int(estudent.get("current_year") or 1) - 1, 3)))
+                    u_sem = st.selectbox("Semester", list(range(1, 9)), index=max(0, min(int(estudent.get("semester") or 1) - 1, 7)))
+                    u_sec = st.selectbox("Section", list("ABCDEFGHIJ"), index="ABCDEFGHIJ".index(estudent.get("section", "A")) if estudent.get("section") in "ABCDEFGHIJ" else 0)
 
-                student = get_student_by_roll(roll_number)
+                with u_col2:
+                    u_email = st.text_input("Email", value=estudent.get("email", ""))
+                    u_phone = st.text_input("Phone", value=estudent.get("phone", "") or "")
+                    u_att = st.number_input("Session Attendance (%)", min_value=0.0, max_value=100.0, value=float(estudent.get("attendance_percentage") or 85.0), step=0.5)
+                    u_cgpa = st.number_input("Cumulative CGPA", min_value=0.0, max_value=10.0, value=float(estudent.get("cgpa") or 8.0), step=0.1)
+                    u_dob = st.text_input("Date of Birth", value=estudent.get("date_of_birth", "") or "")
+                    u_father = st.text_input("Father's Name", value=estudent.get("father_name", "") or "")
 
-                if student:
+                btn_save_upd = st.form_submit_button("💾 Save Changes to Student Profile", type="primary", use_container_width=True)
 
-                    st.session_state.student = student
-
+            if btn_save_upd:
+                success, msg = admin_update_student_profile(
+                    estudent["student_id"],
+                    u_name.strip(),
+                    u_gender,
+                    u_dept,
+                    u_email.strip(),
+                    u_phone.strip(),
+                    int(u_year),
+                    int(u_sem),
+                    u_sec,
+                    float(u_cgpa)
+                )
+                if success:
+                    conn = get_connection()
+                    conn.execute("UPDATE students SET attendance_percentage=?, date_of_birth=?, father_name=? WHERE student_id=?", (u_att, u_dob, u_father, estudent["student_id"]))
+                    conn.commit()
+                    conn.close()
+                    st.success("Student profile updated successfully!")
+                    st.session_state.edit_student_rec = get_student_by_roll(estudent["roll_number"])
+                    st.rerun()
                 else:
-
-                    st.error("Student not found.")
-
-            if "student" in st.session_state:
-
-                student = st.session_state.student
-
-                full_name = st.text_input(
-                    "Full Name",
-                    value=student["full_name"]
-                )
-
-                gender = st.selectbox(
-                    "Gender",
-                    ["Male", "Female", "Other"]
-                )
-
-                department = st.text_input(
-                    "Department",
-                    value=student["department"]
-                )
-
-                semester = st.number_input(
-                    "Semester",
-                    1,
-                    8,
-                    value=student["semester"]
-                )
-
-                email = st.text_input(
-                    "Email",
-                    value=student["email"]
-                )
-
-                phone = st.text_input(
-                    "Phone",
-                    value=student["phone"]
-                )
-
-                if st.button("Update"):
-
-                    update_student(
-                        student["student_id"],
-                        full_name,
-                        gender,
-                        department,
-                        semester,
-                        email,
-                        phone
-                    )
-
-                    st.success("Student Updated Successfully.")
-
-
+                    st.error(f"Failed to update profile: {msg}")
 
     with tab_stu_cie:
-            st.subheader("Manage Student Academic Records")
-            records = get_all_students().to_dict("records")
-            if not records:
-                st.info("No student records are available.")
-            else:
-                student_options = {
-                    f"{record['roll_number']} · {record['full_name']}": record["roll_number"]
-                    for record in records
-                }
-                selected_student = st.selectbox("Student", list(student_options))
-                student_record = get_student_by_roll(student_options[selected_student])
+        st.markdown("#### 📝 Manage Academic Records & Continuous Internal Evaluations (CIE)")
+        st.caption("Inspect and manage student academic performance, course registrations, and CIE marks breakdown.")
+        records = get_all_students().to_dict("records")
+        if not records:
+            st.info("No student records available.")
+        else:
+            student_options = {
+                f"{record['roll_number']} · {record['full_name']} (Dept: {record.get('department', 'N/A')} · Sec: {record.get('section', 'N/A')})": record["roll_number"]
+                for record in records
+            }
+            selected_student_key = st.selectbox("Select Student to Review Marks", list(student_options.keys()), key="cie_student_selector")
+            student_roll = student_options[selected_student_key]
+            student_record = get_student_by_roll(student_roll)
 
-                if student_record:
-                    departments = sorted({row["department"] for row in records if row["department"]})
-                    if student_record["department"] not in departments:
-                        departments.append(student_record["department"])
-                    with st.form("admin_student_academic_profile"):
-                        identity_col, academic_col = st.columns(2)
-                        with identity_col:
-                            full_name = st.text_input("Full name", value=student_record["full_name"])
-                            email = st.text_input("Email", value=student_record["email"])
-                            phone = st.text_input("Phone", value=student_record["phone"] or "")
-                            gender = st.selectbox(
-                                "Gender",
-                                ["Male", "Female", "Other"],
-                                index=["Male", "Female", "Other"].index(student_record["gender"])
-                                if student_record["gender"] in ["Male", "Female", "Other"] else 0,
-                            )
-                            department = st.selectbox(
-                                "Department",
-                                departments,
-                                index=departments.index(student_record["department"]),
-                            )
-                        with academic_col:
-                            current_year = st.selectbox(
-                                "Current year", [1, 2, 3, 4],
-                                index=max(0, min(int(student_record["current_year"] or 1) - 1, 3)),
-                            )
-                            semester = st.selectbox(
-                                "Semester", list(range(1, 9)),
-                                index=max(0, min(int(student_record["semester"] or 1) - 1, 7)),
-                            )
-                            section = st.selectbox(
-                                "Section", list("ABCDEFGHIJ"),
-                                index="ABCDEFGHIJ".index(student_record["section"])
-                                if student_record["section"] in "ABCDEFGHIJ" else 0,
-                            )
-                            cgpa = float(student_record.get("cgpa") or 0.0)
-                            st.markdown("###### 🔒 Faculty-Governed Continuous Evaluations")
-                            st.caption("Student session attendance and continuous assessment marks can only be submitted by assigned faculty.")
-                            att_val = float(student_record["attendance_percentage"] or 0)
-                            int_val = float(student_record["internal_marks"] or 0)
-                            st.info(
-                                f"• **Session Attendance:** {att_val:.1f}%\n\n"
-                                f"• **Continuous Internal (CIE) Marks:** {int_val:.1f} / 60\n\n"
-                                "• **Framework:** Pure In-Semester CIE (Grades & External marks removed)"
-                            )
-                        update_student_record = st.form_submit_button("Save student profile", type="primary")
+            if student_record:
+                stu_id = student_record["student_id"]
+                stu_sem = int(student_record.get("semester") or 1)
 
-                    if update_student_record:
-                        success, message = admin_update_student_profile(
-                            student_record["student_id"],
-                            full_name,
-                            gender,
-                            department,
-                            email,
-                            phone,
-                            current_year,
-                            semester,
-                            section,
-                            cgpa,
-                        )
-                        if success:
-                            st.success(message)
-                            st.rerun()
-                        else:
-                            st.error(message)
+                # Top summary cards
+                sc1, sc2, sc3, sc4 = st.columns(4)
+                with sc1:
+                    st.metric("Roll Number", student_record["roll_number"])
+                with sc2:
+                    st.metric("Academic Section", f"Section {student_record.get('section', 'A')} · Sem {stu_sem}")
+                with sc3:
+                    st.metric("Session Attendance", f"{float(student_record.get('attendance_percentage') or 0):.1f}%")
+                with sc4:
+                    int_m = student_record.get('internal_marks')
+                    st.metric("Overall CIE", f"{float(int_m):.1f} / 60" if int_m is not None else "In Progress")
+
+                st.divider()
+                st.markdown("##### 📚 Registered Courses & Continuous Internal Evaluations (CIE)")
+                stu_assessments = get_student_course_assessments(stu_id, stu_sem)
+                if stu_assessments:
+                    table_rows = []
+                    for ca in stu_assessments:
+                        mid1 = ca.get("mid_1_marks")
+                        mid2 = ca.get("mid_2_marks")
+                        assn = ca.get("assignment_marks")
+                        quiz = ca.get("quiz_marks")
+                        viva = ca.get("viva_marks")
+                        internal = ca.get("internal_total")
+                        att = ca.get("course_attendance")
+                        table_rows.append({
+                            "Course Code": ca.get("course_code", "—"),
+                            "Course Name": ca.get("course_name", "—"),
+                            "Credits": ca.get("credits", 3),
+                            "Mid-1 /15": f"{float(mid1):.1f}" if mid1 is not None else "Pending",
+                            "Mid-2 /15": f"{float(mid2):.1f}" if mid2 is not None else "Pending",
+                            "Assignment /10": f"{float(assn):.1f}" if assn is not None else "Pending",
+                            "Quiz /10": f"{float(quiz):.1f}" if quiz is not None else "Pending",
+                            "Viva /10": f"{float(viva):.1f}" if viva is not None else "Pending",
+                            "Current CIE /60": f"{float(internal):.1f}" if internal is not None else "In Progress",
+                            "Course Attendance": f"{float(att):.1f}%" if att is not None else "—",
+                            "Faculty Evaluator": ca.get("faculty_name", "Assigned Faculty"),
+                        })
+                    st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No course assessment records currently registered for this semester.")
 
 
 
@@ -1482,39 +1500,27 @@ elif menu == "📋 Approvals & Teaching Requests":
             st.metric("Pending faculty registrations", len(pending_faculty))
             timetable_roster = [
                 member for member in pending_faculty
-                if member["employee_id"].startswith("SCHED")
+                if str(member.get("employee_id", "")).startswith("SCHED")
             ]
             if timetable_roster:
-                confirm_roster = st.checkbox(
-                    f"I reviewed the timetable roster of {len(timetable_roster)} faculty members",
-                    key="confirm_bulk_timetable_faculty"
-                )
-                if st.button(
-                    "Approve all timetable faculty and assign their sections",
-                    type="primary",
-                    disabled=not confirm_roster,
-                    use_container_width=True
-                ):
-                    approved = approve_all_scheduled_faculty()
-                    st.success(f"Approved and assigned {approved} timetable faculty members.")
-                    st.rerun()
-            schedule_roster_count = sum(bool(faculty_member.get("employee_id", "").startswith("SCHED")) for faculty_member in pending_faculty)
-            if schedule_roster_count:
-                confirm_schedule_faculty = st.checkbox(
-                    f"I verified the imported timetable roster ({schedule_roster_count} faculty members)",
-                    key="confirm_schedule_faculty_bulk_approval"
-                )
-                if st.button(
-                    "Approve all timetable faculty and assign their scheduled sections",
-                    disabled=not confirm_schedule_faculty,
-                    type="primary",
-                    use_container_width=True
-                ):
-                    approved_count = approve_all_scheduled_faculty(
-                        admin.get("username", admin.get("email", "Admin"))
+                with st.container(border=True):
+                    st.markdown(f"⚡ **Timetable Import Roster ({len(timetable_roster)} faculty members)**")
+                    st.caption("These instructors are mapped to academic sections in the uploaded semester timetable schedule.")
+                    confirm_roster = st.checkbox(
+                        f"I verified the imported timetable roster ({len(timetable_roster)} faculty members)",
+                        key="confirm_bulk_timetable_faculty"
                     )
-                    st.success(f"Approved and assigned {approved_count} timetable faculty members.")
-                    st.rerun()
+                    if st.button(
+                        "Approve all timetable faculty and assign their scheduled sections",
+                        type="primary",
+                        disabled=not confirm_roster,
+                        use_container_width=True,
+                        key="btn_approve_all_sched_fac"
+                    ):
+                        admin_name = admin.get("username", admin.get("email", "Admin"))
+                        approved = approve_all_scheduled_faculty(admin_name)
+                        st.success(f"Approved and assigned {approved} timetable faculty members.")
+                        st.rerun()
 
             if not pending_faculty:
                 st.success("There are no faculty registrations awaiting approval.")
@@ -2338,7 +2344,7 @@ elif menu == "📢 Announcements & Audit Trail":
 
     with tab_ann_act:
         st.markdown("#### 📋 Published Announcements History")
-        active_anns = get_system_announcements(limit=30)
+        active_anns = get_system_announcements()[:30]
         if not active_anns:
             st.info("No active announcements currently published.")
         else:

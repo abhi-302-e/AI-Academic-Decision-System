@@ -33,7 +33,25 @@ def prepare_training_data(records, attendance_threshold=75.0, critical_score=40.
     frame = pd.DataFrame(records)
     if frame.empty:
         return frame
-    frame = frame.dropna(subset=FEATURES).copy()
+    
+    # Safely handle in-progress in-semester evaluation features without dropping records
+    for col in FEATURES:
+        if col not in frame.columns:
+            frame[col] = 0.0
+        else:
+            frame[col] = pd.to_numeric(frame[col], errors="coerce").fillna(0.0)
+
+    # Scale mid exam marks if only mid_1_marks is present
+    if "mid_1_marks" in frame.columns:
+        m1 = pd.to_numeric(frame["mid_1_marks"], errors="coerce").fillna(0.0)
+        m2 = pd.to_numeric(frame["mid_2_marks"], errors="coerce").fillna(0.0) if "mid_2_marks" in frame.columns else 0.0
+        mid_sum = m1 + m2
+        mid_proj = m1 * 2.0
+        frame["mid_exam_marks"] = frame["mid_exam_marks"].mask(
+            frame["mid_exam_marks"] == 0,
+            mid_sum.mask(mid_sum == 0, mid_proj)
+        )
+
     frame["internal_total"] = (
         frame["assignment_marks"]
         + frame["quiz_marks"]

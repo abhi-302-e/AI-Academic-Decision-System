@@ -1886,8 +1886,8 @@ def get_student_course_assessments(student_id, semester=None):
                ca.viva_marks, ca.external_marks, c.catalog_code AS course_code,
                c.course_name, c.credits, c.course_type, sr.semester, sr.academic_year,
                sr.section, sc.year,
-               ROUND(ca.assignment_marks + ca.quiz_marks + ca.mid_exam_marks + ca.viva_marks, 2) AS internal_total,
-               ROUND(ca.assignment_marks + ca.quiz_marks + ca.mid_exam_marks + ca.viva_marks + ca.external_marks, 2) AS overall_total,
+               ROUND(COALESCE(ca.assignment_marks, 0) + COALESCE(ca.quiz_marks, 0) + COALESCE(ca.mid_exam_marks, (COALESCE(ca.mid_1_marks, 0) + COALESCE(ca.mid_2_marks, 0)), COALESCE(ca.mid_1_marks, 0) * 2.0) + COALESCE(ca.viva_marks, 0), 2) AS internal_total,
+               ROUND(COALESCE(ca.assignment_marks, 0) + COALESCE(ca.quiz_marks, 0) + COALESCE(ca.mid_exam_marks, (COALESCE(ca.mid_1_marks, 0) + COALESCE(ca.mid_2_marks, 0)), COALESCE(ca.mid_1_marks, 0) * 2.0) + COALESCE(ca.viva_marks, 0) + COALESCE(ca.external_marks, 0), 2) AS overall_total,
                COALESCE(att.course_attendance, 0) AS course_attendance,
                tt.faculty_name
         FROM course_assessments ca
@@ -1931,14 +1931,15 @@ def get_course_model_training_data():
     rows = connection.execute(
         """
         SELECT s.roll_number, s.full_name AS student_name,
-               ca.assignment_marks, ca.quiz_marks, ca.mid_exam_marks,
-               COALESCE(ca.mid_1_marks, ROUND(ca.mid_exam_marks / 2.0, 1)) AS mid_1_marks,
-               COALESCE(ca.mid_2_marks, ROUND(ca.mid_exam_marks - ROUND(ca.mid_exam_marks / 2.0, 1), 1)) AS mid_2_marks,
-               ca.viva_marks, ca.external_marks,
-               ROUND(ca.assignment_marks + ca.quiz_marks + ca.mid_exam_marks
-                     + ca.viva_marks, 2) AS internal_total,
-               ROUND(ca.assignment_marks + ca.quiz_marks + ca.mid_exam_marks
-                     + ca.viva_marks + ca.external_marks, 2) AS overall_total,
+               COALESCE(ca.assignment_marks, 0.0) AS assignment_marks,
+               COALESCE(ca.quiz_marks, 0.0) AS quiz_marks,
+               COALESCE(ca.mid_exam_marks, (COALESCE(ca.mid_1_marks, 0.0) + COALESCE(ca.mid_2_marks, 0.0)), COALESCE(ca.mid_1_marks, 0.0) * 2.0) AS mid_exam_marks,
+               COALESCE(ca.mid_1_marks, ROUND(ca.mid_exam_marks / 2.0, 1), 0.0) AS mid_1_marks,
+               COALESCE(ca.mid_2_marks, ROUND(ca.mid_exam_marks - ROUND(ca.mid_exam_marks / 2.0, 1), 1), 0.0) AS mid_2_marks,
+               COALESCE(ca.viva_marks, 0.0) AS viva_marks,
+               COALESCE(ca.external_marks, 0.0) AS external_marks,
+               ROUND(COALESCE(ca.assignment_marks, 0) + COALESCE(ca.quiz_marks, 0) + COALESCE(ca.mid_exam_marks, (COALESCE(ca.mid_1_marks, 0) + COALESCE(ca.mid_2_marks, 0)), COALESCE(ca.mid_1_marks, 0) * 2.0) + COALESCE(ca.viva_marks, 0), 2) AS internal_total,
+               ROUND(COALESCE(ca.assignment_marks, 0) + COALESCE(ca.quiz_marks, 0) + COALESCE(ca.mid_exam_marks, (COALESCE(ca.mid_1_marks, 0) + COALESCE(ca.mid_2_marks, 0)), COALESCE(ca.mid_1_marks, 0) * 2.0) + COALESCE(ca.viva_marks, 0) + COALESCE(ca.external_marks, 0), 2) AS overall_total,
                COALESCE(attendance.course_attendance, 0) AS course_attendance,
                sr.semester, sr.section, c.department, c.year,
                COALESCE(c.catalog_code, c.course_code) AS course_code,
@@ -1959,11 +1960,6 @@ def get_course_model_training_data():
            AND attendance.course_id = ca.course_id
            AND attendance.section = sr.section
         WHERE sr.status = 'Registered'
-          AND ca.assignment_marks IS NOT NULL
-          AND ca.quiz_marks IS NOT NULL
-          AND ca.mid_exam_marks IS NOT NULL
-          AND ca.viva_marks IS NOT NULL
-          AND ca.external_marks IS NOT NULL
         """
     ).fetchall()
     connection.close()
@@ -5571,6 +5567,9 @@ def get_all_students():
             student_id,
             roll_number,
             full_name,
+            gender,
+            email,
+            phone,
             department,
             current_year,
             NULLIF(semester, 0) AS semester,
@@ -5580,9 +5579,16 @@ def get_all_students():
             assignment_marks,
             quiz_marks,
             mid_exam_marks,
+            mid_1_marks,
+            mid_2_marks,
             end_sem_marks,
             internal_marks,
-            external_marks
+            external_marks,
+            account_status,
+            date_of_birth,
+            enrollment_no,
+            father_name,
+            mother_name
         FROM students
         ORDER BY roll_number
         """,
