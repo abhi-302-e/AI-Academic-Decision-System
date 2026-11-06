@@ -161,12 +161,41 @@ with tab_manual:
 
     if scope_mode == "Individual Student":
         st.markdown("---")
-        students_df = get_all_students()
-        students_list = students_df.to_dict("records") if hasattr(students_df, "to_dict") else list(students_df)
-        stu_choices = {
-            f"{s.get('roll_number', '')} - {s.get('full_name', '')} (Section {s.get('section', '—')})": s.get("student_id")
-            for s in students_list
-        }
+        
+        # Primary direct database fetch to guarantee all students are loaded safely
+        students_list = []
+        try:
+            conn = get_connection()
+            rows = conn.execute("""
+                SELECT student_id, roll_number, full_name, section, email, phone, department, semester
+                FROM students
+                ORDER BY roll_number
+            """).fetchall()
+            students_list = [dict(r) for r in rows]
+            conn.close()
+        except Exception as e:
+            students_list = []
+
+        # Secondary fallback if direct query returned empty
+        if not students_list:
+            try:
+                students_df = get_all_students()
+                if hasattr(students_df, "to_dict"):
+                    students_list = students_df.to_dict("records")
+                elif isinstance(students_df, list):
+                    students_list = [dict(r) if hasattr(r, "keys") else r for r in students_df]
+            except Exception:
+                students_list = []
+
+        stu_choices = {}
+        for s in students_list:
+            if isinstance(s, dict):
+                r_num = s.get("roll_number", "")
+                name = s.get("full_name", "")
+                sec = s.get("section", "—")
+                s_id = s.get("student_id")
+                if r_num and s_id is not None:
+                    stu_choices[f"{r_num} - {name} (Section {sec})"] = s_id
 
         if stu_choices:
             sel_label = st.selectbox("🎯 Select Student to Dispatch", list(stu_choices.keys()), index=0)
@@ -244,6 +273,8 @@ with tab_manual:
                                     st.dataframe(pd.DataFrame(res.get("logs")), use_container_width=True, hide_index=True)
                             else:
                                 st.error(f"❌ Dispatch error: {res.get('message')}")
+            else:
+                st.info("No active course assessment records found for this student.")
         else:
             st.warning("No students available in the database.")
 

@@ -4163,9 +4163,9 @@ def get_student_by_email(email):
 
 # -----------------------------------------------------------
 
-def get_all_students():
+def get_all_students_rows():
     """
-    Return all students.
+    Return all students as raw sqlite3.Row records.
     """
 
     connection = get_connection()
