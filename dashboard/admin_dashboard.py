@@ -294,7 +294,7 @@ if st.sidebar.button("🚪 Logout Administrator", key="sb_logout_btn", use_conta
 # ==========================================================
 # MODULE 1: EXECUTIVE COCKPIT & OVERVIEW
 # ==========================================================
-if menu == "📊 Executive Cockpit & KPIs":
+if menu == "📊 Executive Cockpit & Overview" or menu == "📊 Executive Cockpit & KPIs":
 
     st.subheader("🌐 University Executive Leadership Cockpit & Accreditation Radar")
     st.caption("Strategic institutional governance overview for Vice-Chancellor, Dean of Academics, and University Registrar.")
