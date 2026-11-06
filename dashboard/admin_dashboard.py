@@ -916,42 +916,31 @@ elif menu == "🎓 Student Lifecycle & Records":
             st.info("No student accounts found.")
 
     with tab_stu_del:
-            st.subheader("Delete Student")
+        st.subheader("Delete Student")
+        st.caption("Permanently remove a registered student account from the university database.")
 
-            roll_number = st.text_input("Enter Roll Number")
+        roll_number_del = st.text_input("Enter Roll Number to Delete", placeholder="e.g. 26STU0001", key="stu_del_roll_input").strip()
 
-            if st.button("Search"):
+        if st.button("Search Student to Delete", key="stu_del_search_btn"):
+            student = get_student_by_roll(roll_number_del)
+            if student:
+                st.session_state.delete_student = student
+            else:
+                st.error("Student Not Found")
 
-                student = get_student_by_roll(roll_number)
+        if "delete_student" in st.session_state and st.session_state.delete_student:
+            student = st.session_state.delete_student
+            with st.container(border=True):
+                st.markdown(f"##### ⚠️ Confirm Deletion for: **{student['full_name']}**")
+                st.write(f"**Roll Number:** `{student['roll_number']}` | **Department:** {student['department']}")
+                st.write(f"**Semester:** {student['semester']} | **Email:** {student.get('email', 'N/A')}")
+                st.caption("Warning: Deleting this student will remove all associated semester registrations and grades.")
 
-                if student:
-
-                    st.session_state.delete_student = student
-
-                else:
-
-                    st.error("Student Not Found")
-
-            if "delete_student" in st.session_state:
-
-                student = st.session_state.delete_student
-
-                st.write("### Student Details")
-
-                st.write(f"**Roll Number:** {student['roll_number']}")
-                st.write(f"**Name:** {student['full_name']}")
-                st.write(f"**Department:** {student['department']}")
-                st.write(f"**Semester:** {student['semester']}")
-
-                if st.button("Delete Student"):
-
-                    delete_student(
-                        student["student_id"]
-                    )
-
+                if st.button("🗑️ Permanently Delete Student", type="primary", key="btn_confirm_del_stu"):
+                    delete_student(student["student_id"])
                     del st.session_state.delete_student
-
                     st.success("Student Deleted Successfully")
+                    st.rerun()
 
 
 
@@ -1245,97 +1234,83 @@ elif menu == "👨‍🏫 Faculty Workload & Governance":
 
 
     with tab_fac_upd:
-            st.subheader("Update Faculty")
+        st.subheader("Update Faculty Profile")
+        st.caption("Search faculty member by Employee ID to review and edit credentials.")
 
-            employee_id = st.text_input("Enter Employee ID")
+        employee_id = st.text_input("Enter Employee ID to Edit", placeholder="e.g. SCHED0001", key="fac_upd_emp_id").strip()
 
-            if st.button("Search Faculty"):
+        if st.button("Search Faculty Member", key="fac_upd_search_btn"):
+            faculty = get_faculty_by_employee_id(employee_id)
+            if faculty:
+                st.session_state.faculty = faculty
+            else:
+                st.error("Faculty Not Found")
 
-                faculty = get_faculty_by_employee_id(employee_id)
-
-                if faculty:
-                    st.session_state.faculty = faculty
-                else:
-                    st.error("Faculty Not Found")
-
-            if "faculty" in st.session_state:
-
-                faculty = st.session_state.faculty
-
-                full_name = st.text_input(
-                    "Full Name",
-                    value=faculty["full_name"]
-                )
-
-                department = st.text_input(
-                    "Department",
-                    value=faculty["department"]
-                )
-
-                email = st.text_input(
-                    "Email",
-                    value=faculty["email"]
-                )
-
-                phone = st.text_input(
-                    "Phone",
-                    value=faculty["phone"]
-                )
-
-                qualification = st.text_input(
-                    "Qualification",
-                    value=faculty["qualification"] or ""
-                )
-
-                experience = st.number_input(
-                    "Teaching experience (years)",
-                    min_value=0,
-                    max_value=60,
-                    value=int(faculty["experience"] or 0)
-                )
-
-                designation_options = [
-                    "Lecturer",
-                    "Assistant Professor",
-                    "Associate Professor",
-                    "Professor",
-                ]
-                if faculty["designation"] and faculty["designation"] not in designation_options:
-                    designation_options.append(faculty["designation"])
-                designation = st.selectbox(
-                    "Designation",
-                    designation_options,
-                    index=designation_options.index(faculty["designation"])
-                    if faculty["designation"] in designation_options else 0,
-                )
-
-                status_options = ["Active", "Pending Approval", "Rejected"]
-                status = st.selectbox(
-                    "Account status",
-                    status_options,
-                    index=status_options.index(faculty["status"])
-                    if faculty["status"] in status_options else 0,
-                )
-
-                if st.button("Update Faculty"):
-
-                    success = admin_update_faculty_profile(
-                        faculty["faculty_id"],
-                        full_name,
-                        department,
-                        email,
-                        phone,
-                        qualification,
-                        experience,
-                        designation,
-                        status,
+        if "faculty" in st.session_state and st.session_state.faculty:
+            faculty = st.session_state.faculty
+            with st.form("admin_edit_faculty_form"):
+                st.markdown(f"##### Editing Faculty: **{faculty['full_name']}** ({faculty['employee_id']})")
+                col_u1, col_u2 = st.columns(2)
+                with col_u1:
+                    full_name = st.text_input("Full Name", value=faculty["full_name"], key="fac_upd_name")
+                    department = st.text_input("Department", value=faculty["department"], key="fac_upd_dept")
+                    designation_options = [
+                        "Lecturer",
+                        "Assistant Professor",
+                        "Associate Professor",
+                        "Professor",
+                        "Professor & HOD",
+                    ]
+                    if faculty["designation"] and faculty["designation"] not in designation_options:
+                        designation_options.append(faculty["designation"])
+                    designation = st.selectbox(
+                        "Designation",
+                        designation_options,
+                        index=designation_options.index(faculty["designation"])
+                        if faculty["designation"] in designation_options else 0,
+                        key="fac_upd_desig"
+                    )
+                    status_options = ["Active", "Pending Approval", "Rejected"]
+                    status = st.selectbox(
+                        "Account Status",
+                        status_options,
+                        index=status_options.index(faculty["status"])
+                        if faculty["status"] in status_options else 0,
+                        key="fac_upd_status"
                     )
 
+                with col_u2:
+                    email = st.text_input("Email", value=faculty["email"], key="fac_upd_email")
+                    phone = st.text_input("Phone", value=faculty["phone"] or "", key="fac_upd_phone")
+                    qualification = st.text_input("Academic Qualification", value=faculty["qualification"] or "", key="fac_upd_qual")
+                    experience = st.number_input(
+                        "Teaching Experience (Years)",
+                        min_value=0,
+                        max_value=60,
+                        value=int(faculty["experience"] or 0),
+                        key="fac_upd_exp"
+                    )
+
+                btn_fac_update = st.form_submit_button("💾 Save Faculty Profile Changes", type="primary", use_container_width=True)
+
+            if btn_fac_update:
+                success = admin_update_faculty_profile(
+                    faculty["faculty_id"],
+                    full_name,
+                    department,
+                    email,
+                    phone,
+                    qualification,
+                    experience,
+                    designation,
+                    status,
+                )
+                if success:
                     del st.session_state.faculty
-                    if success:
-                        st.success("Faculty profile updated successfully.")
-                    else:
-                        st.error("Faculty profile could not be updated. Check for duplicate email addresses.")
+                    st.success("Faculty profile updated successfully.")
+                    st.rerun()
+                else:
+                    st.error("Faculty profile could not be updated. Check for duplicate email addresses.")
 
 
 
@@ -1369,39 +1344,31 @@ elif menu == "👨‍🏫 Faculty Workload & Governance":
             st.info("No faculty accounts found.")
 
     with tab_fac_del:
-            st.subheader("Delete Faculty")
+        st.subheader("Delete Faculty Member")
+        st.caption("Permanently remove a faculty appointment from the university roster.")
 
-            employee_id = st.text_input("Enter Employee ID")
+        employee_id_del = st.text_input("Enter Employee ID to Delete", placeholder="e.g. SCHED0001", key="fac_del_emp_id").strip()
 
-            if st.button("Search Faculty"):
+        if st.button("Search Faculty to Remove", key="fac_del_search_btn"):
+            faculty_del = get_faculty_by_employee_id(employee_id_del)
+            if faculty_del:
+                st.session_state.delete_faculty = faculty_del
+            else:
+                st.error("Faculty Not Found")
 
-                faculty = get_faculty_by_employee_id(employee_id)
+        if "delete_faculty" in st.session_state and st.session_state.delete_faculty:
+            faculty = st.session_state.delete_faculty
+            with st.container(border=True):
+                st.markdown(f"##### ⚠️ Confirm Deletion for: **{faculty['full_name']}**")
+                st.write(f"**Employee ID:** `{faculty['employee_id']}` | **Department:** {faculty['department']}")
+                st.write(f"**Email:** {faculty['email']} | **Designation:** {faculty.get('designation', 'Faculty')}")
+                st.caption("Warning: Deleting this faculty member will unassign all their teaching schedule allocations.")
 
-                if faculty:
-                    st.session_state.delete_faculty = faculty
-                else:
-                    st.error("Faculty Not Found")
-
-            if "delete_faculty" in st.session_state:
-
-                faculty = st.session_state.delete_faculty
-
-                st.write("### Faculty Details")
-
-                st.write(f"**Employee ID:** {faculty['employee_id']}")
-                st.write(f"**Name:** {faculty['full_name']}")
-                st.write(f"**Department:** {faculty['department']}")
-                st.write(f"**Email:** {faculty['email']}")
-
-                if st.button("Delete Faculty"):
-
-                    delete_faculty(
-                        faculty["faculty_id"]
-                    )
-
+                if st.button("🗑️ Permanently Delete Faculty", type="primary", key="btn_confirm_fac_del"):
+                    delete_faculty(faculty["faculty_id"])
                     del st.session_state.delete_faculty
-
-                    st.success("Faculty Deleted Successfully")
+                    st.success("Faculty member deleted successfully.")
+                    st.rerun()
 
 
         # ==========================================================
