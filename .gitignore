@@ -7,3 +7,5 @@ __pycache__/
 !dataset/student.db
 
 .streamlit/secrets.toml
+.vscode/
+scratch/
