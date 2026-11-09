@@ -39,6 +39,7 @@
 18. [Default Login Credentials](#-18-default-login-credentials)
 19. [Academic & Research References](#-19-academic--research-references)
 20. [Live Demo](#-20-live-demo)
+21. [Contributors & Development Team](#-21-contributors--development-team)
 
 ---
 
@@ -548,3 +549,17 @@ OK
 ## 🌐 20. Live Demo
 
 👉 **[Open AI Academic Decision System](https://ai-academic-decision-system.streamlit.app/)**
+
+---
+
+## 👥 21. Contributors & Development Team
+
+| Contributor | GitHub Profile | Role | Department & Institution |
+| :--- | :--- | :--- | :--- |
+| **Karthik Abhishek** | [@abhi-302-e](https://github.com/abhi-302-e) | Project Lead, System Architect & ML Engineer | Department of CSE, FST, IFHE Hyderabad |
+| **Gangi Bharath Chandra** | [@gangibharathchandra](https://github.com/gangibharathchandra) | Core Contributor & Collaborator | Faculty of Science & Technology, IFHE Hyderabad |
+
+### Faculty Mentors & Guides
+* **Mrs. Madhusmita Majhi** — Assistant Professor, Department of Computer Science & Engineering, Faculty of Science & Technology (FST), The ICFAI Foundation for Higher Education (IFHE), Hyderabad
+* **Dr. D. Krishna Madhuri** — Associate Professor, Department of Computer Science & Engineering, Faculty of Science & Technology (FST), The ICFAI Foundation for Higher Education (IFHE), Hyderabad
+
