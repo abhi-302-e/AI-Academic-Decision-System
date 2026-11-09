@@ -556,7 +556,7 @@ OK
 
 | Contributor | GitHub Profile | Role | Department & Institution |
 | :--- | :--- | :--- | :--- |
-| **Karthik Abhishek** | [@abhi-302-e](https://github.com/abhi-302-e) | Project Lead, System Architect & ML Engineer | Department of CSE, FST, IFHE Hyderabad |
+| **EDULAKANTI ABHISHEK** | [@abhi-302-e](https://github.com/abhi-302-e) | Project Lead, System Architect & ML Engineer | Department of CSE, FST, IFHE Hyderabad |
 | **Gangi Bharath Chandra** | [@gangibharathchandra](https://github.com/gangibharathchandra) | Core Contributor & Collaborator | Faculty of Science & Technology, IFHE Hyderabad |
 
 ### Faculty Mentors & Guides
