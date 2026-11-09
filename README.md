@@ -1,8 +1,17 @@
 # AI-Based Autonomous Academic Decision System
 
-**Domain:** Artificial Intelligence + Machine Learning + Data Analytics  
-**Real-World Application:** Self-Learning ERP Intelligence & Multi-Agent Academic Governance  
-**Theme:** Proactive AI Academic Decision Support & Tamper-Proof Institutional Governance  
+[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
+[![Framework](https://img.shields.io/badge/Framework-Streamlit-FF4B4B.svg)](https://streamlit.io/)
+[![Machine Learning](https://img.shields.io/badge/ML-Scikit--Learn-F7931E.svg)](https://scikit-learn.org/)
+[![LLM Engine](https://img.shields.io/badge/LLM-Google%20Gemini%202.5%2F3.8%20Flash-4285F4.svg)](https://ai.google.dev/)
+[![Security](https://img.shields.io/badge/Security-HMAC--SHA256%20Cryptographic%20Ledger-success.svg)](#-enterprise-security--governance-mechanisms)
+[![Model Accuracy](https://img.shields.io/badge/Performance%20Model-97.4%25-brightgreen.svg)](#-machine-learning-models--evaluation)
+[![Risk Detection](https://img.shields.io/badge/Risk%20Detection-99.0%25-brightgreen.svg)](#-machine-learning-models--evaluation)
+[![Compliance](https://img.shields.io/badge/Compliance-UGC%2075%25%20%7C%20FERPA%20%7C%20DPDP-orange.svg)](#-enterprise-security--governance-mechanisms)
+
+**Domain:** Artificial Intelligence + Machine Learning + Learning Analytics  
+**Real-World Application:** Self-Learning ERP Intelligence & Autonomous Academic Governance  
+**Theme:** Proactive AI Academic Decision Support, Real-Time Student Rescue & Cryptographic Non-Repudiation  
 **Faculty Guides:** Mrs. Madhusmita Majhi & Dr. D. Krishna Madhuri  
 **Institution:** The ICFAI Foundation for Higher Education (IFHE), Faculty of Science & Technology (FST), Hyderabad  
 
@@ -14,25 +23,28 @@
 2. [End-to-End System Architecture](#-2-end-to-end-system-architecture)
 3. [Autonomous Multi-Agent Architecture](#-3-autonomous-multi-agent-architecture)
 4. [Enterprise Security & Governance Mechanisms](#-4-enterprise-security--governance-mechanisms)
-5. [Data Structures Implemented](#-5-data-structures-implemented)
-6. [Comprehensive Tools, Frameworks & Technology Stack](#-6-comprehensive-tools-frameworks--technology-stack)
-7. [Dataset Benchmark Integration](#-7-dataset-benchmark-integration)
-8. [Accredited Curriculum (Year 1 Semester 1)](#-8-accredited-curriculum-year-1-semester-1)
-9. [Continuous Internal Evaluation (CIE) 60/40 Scheme](#-9-continuous-internal-evaluation-cie-6040-scheme)
-10. [Machine Learning Models & Evaluation](#-10-machine-learning-models--evaluation)
-11. [Application Modules & Role-Based Portals](#-11-application-modules--role-based-portals)
-12. [Project Directory Structure](#-12-project-directory-structure)
-13. [Project Phases & Implementation Milestones](#-13-project-phases--implementation-milestones)
-14. [Installation & Local Execution](#-14-installation--local-execution)
-15. [Automated Unit & Security Verification Tests](#-15-automated-unit--security-verification-tests)
-16. [Default Login Credentials](#-16-default-login-credentials)
-17. [Live Demo](#-17-live-demo)
+5. [Mathematical Formulations & Academic Metrics](#-5-mathematical-formulations--academic-metrics)
+6. [Data Structures Implemented](#-6-data-structures-implemented)
+7. [Comprehensive Tools, Frameworks & Technology Stack](#-7-comprehensive-tools-frameworks--technology-stack)
+8. [Dataset Benchmark Integration](#-8-dataset-benchmark-integration)
+9. [Accredited Curriculum (Year 1 Semester 1)](#-9-accredited-curriculum-year-1-semester-1)
+10. [Continuous Internal Evaluation (CIE) 60/40 Scheme](#-10-continuous-internal-evaluation-cie-6040-scheme)
+11. [Machine Learning Models & Evaluation](#-11-machine-learning-models--evaluation)
+12. [System Comparison: Traditional ERP vs. AI Autonomous ERP](#-12-system-comparison-traditional-erp-vs-ai-autonomous-erp)
+13. [Application Modules & Role-Based Portals](#-13-application-modules--role-based-portals)
+14. [Project Directory Structure](#-14-project-directory-structure)
+15. [Project Phases & Implementation Milestones](#-15-project-phases--implementation-milestones)
+16. [Installation & Local Execution](#-16-installation--local-execution)
+17. [Automated Unit & Security Verification Tests](#-17-automated-unit--security-verification-tests)
+18. [Default Login Credentials](#-18-default-login-credentials)
+19. [Academic & Research References](#-19-academic--research-references)
+20. [Live Demo](#-20-live-demo)
 
 ---
 
 ## 📌 1. Executive Summary & Problem Statement
 
-Educational institutions collect massive volumes of academic data, including attendance logs, continuous internal assessments, laboratory sessions, assignment submissions, LMS clickstream activities, and student feedback. However, academic governance and intervention decisions are predominantly made manually or **post-facto**—often after end-semester examinations when it is too late to rescue failing or debarred students.
+Educational institutions collect large volumes of academic data, including attendance logs, continuous internal assessments, laboratory sessions, assignment submissions, LMS clickstream activities, and student feedback. However, academic governance and intervention decisions are predominantly made manually or **post-facto**—often after end-semester examinations when it is too late to rescue failing or debarred students.
 
 This project delivers an **AI-Based Autonomous Academic Decision System** directly integrated into an institutional ERP workflow. The system features:
 1. **Realistic Academic Structure:** 500 Year 1 Semester 1 students realigned across 10 balanced sections (**Sections A through J**, capped at 50 students each) enrolled in an accredited 20-credit curriculum (8 courses).
@@ -49,63 +61,83 @@ This project delivers an **AI-Based Autonomous Academic Decision System** direct
 
 ## 🏗️ 2. End-to-End System Architecture
 
-```text
-+-----------------------------------------------------------------------------------+
-|                        INSTITUTIONAL ERP DATABASE (SQLite)                        |
-|  500 Enrolled Students · 10 Sections (A–J, 50/sec) · 8 Year 1 Sem 1 Courses       |
-|  Timetable (630 weekly slots) · 4,000 Assessments · 2,400 Attendance Sessions     |
-+-----------------------------------------+-----------------------------------------+
-                                          |
-                                          v
-+-----------------------------------------------------------------------------------+
-|                       STRICT ERP REGISTRATION GATEKEEPER                          |
-|  Verifies formal semester registration before granting access to:                 |
-|  • Continuous Internal Evaluation (60)  • External End-Semester Marks (40)        |
-|  • Timetable Sessions & Attendance      • AI Academic Predictions                 |
-+-----------------------------------------+-----------------------------------------+
-                                          |
-                                          v
-+-----------------------------------------------------------------------------------+
-|                     DATA PREPROCESSING & FEATURE SYNTHESIS                        |
-|  Synthesizes 4 Foundational Benchmark Datasets:                                   |
-|  1. Kaggle: Parental education, study habits, continuous quiz persistence         |
-|  2. UCI (Cortez & Silva): G1 (Mid-Term), G2 (CIE Internal), absences, failures    |
-|  3. OULAD: VLE interactions, TMA/CMA assessment timeliness, engagement weights     |
-|  4. Institutional ERP: 60/40 marks breakdown, 50-student rosters, faculty logs     |
-+-----------------------------------------+-----------------------------------------+
-                                          |
-                                          v
-+-----------------------------------------------------------------------------------+
-|                  MACHINE LEARNING ENSEMBLES (Admin ML Center)                     |
-|  • Model 1: Student Performance Classifier (Distinction / Pass / Fail) -> 97.4%   |
-|  • Model 2: Academic Risk Detection Model (Low / Medium / High Risk)    -> 99.0%   |
-|  Holdout Validation: Stratified 80/20 Train-Test Split                            |
-+-----------------------------------------+-----------------------------------------+
-                                          |
-                                          v
-+-----------------------------------------------------------------------------------+
-|                           AUTONOMOUS DECISION ENGINE                              |
-|  • Generates course-specific interventions and remedial tutorial referrals        |
-|  • Flags statutory attendance shortages (< 75% UGC minimum threshold)             |
-|  • Recommends advanced learning & honors opportunities for distinction students   |
-+-----------------------------------------+-----------------------------------------+
-                                          |
-                                          v
-+-----------------------------------------------------------------------------------+
-|                             ROLE-BASED USER INTERFACES                            |
-|  🎓 Student Portal (Modeled after ICFAI Foundation for Higher Education ERP)       |
-|  👨‍🏫 Faculty Workspace (60/40 CIE marks entry, 50-student attendance rosters)       |
-|  🛡️ Admin Console (Multi-dataset ML training center, dataset explorer, audits)    |
-|  🤖 Multi-Agent Governance & Cryptographic Ledger Security Control Center          |
-|  📊 Phase 3 EDA Analytics & Institutional Governance Reports                      |
-+-----------------------------------------------------------------------------------+
+```mermaid
+flowchart TD
+    subgraph Data_Layer ["1. Institutional Data & Benchmark Layer"]
+        DB[(Institutional ERP Database - SQLite)]
+        BENCH[4 Datasets: Kaggle + UCI + OULAD + Synthetic ERP]
+        TIMETABLE[Timetable Engine: 630 Weekly Slots · Sections A-J]
+    end
+
+    subgraph Gatekeeper_Layer ["2. ERP Gatekeeper & Feature Synthesis"]
+        REG{Semester Registration Verified?}
+        ISOLATE[Quarantine Unregistered Student]
+        SYNTH[Feature Normalization & Preprocessing]
+    end
+
+    subgraph Intelligence_Layer ["3. ML Intelligence & Cognitive Agents"]
+        M1[Model 1: Performance Classifier -> 97.4% Accuracy]
+        M2[Model 2: Risk Detection Classifier -> 99.0% Accuracy]
+        UGC_CALC[UGC 75% Attendance Trajectory Calculator]
+        AGENT_MESH[6-Agent Autonomous Cognitive Orchestrator]
+    end
+
+    subgraph Governance_Security ["4. Security & Cryptographic Ledger"]
+        PII[FERPA / DPDP PII Tokenizer]
+        GUARD[Prompt Injection & Canary Guardrails]
+        RL[Sliding-Window Token-Bucket Rate Limiter]
+        HMAC[(Cryptographic Audit Ledger - HMAC-SHA256)]
+    end
+
+    subgraph Presentation_Dispatch ["5. Role-Based Portals & Multi-Channel Dispatch"]
+        STUDENT_UI[🎓 Student Portal - ICFAI IFHE Aesthetic]
+        FACULTY_UI[👨‍🏫 Faculty Workspace - 60/40 Grading & Rosters]
+        ADMIN_UI[🛡️ Admin Console - ML Retraining & Governance]
+        AGENT_UI[🤖 Autonomous Agent Governance Command Center]
+        CHANNELS[Unified Dispatch: Email + WhatsApp + SMS]
+    end
+
+    DB & BENCH & TIMETABLE --> REG
+    REG -- No --> ISOLATE
+    REG -- Yes --> SYNTH
+    SYNTH --> M1 & M2 & UGC_CALC
+    M1 & M2 & UGC_CALC --> AGENT_MESH
+    AGENT_MESH <--> PII & GUARD & RL & HMAC
+    AGENT_MESH --> STUDENT_UI & FACULTY_UI & ADMIN_UI & AGENT_UI
+    AGENT_MESH --> CHANNELS
 ```
 
 ---
 
 ## 🤖 3. Autonomous Multi-Agent Architecture
 
-The autonomous subsystem (`agent_orchestrator.py`) decomposes academic decision-making into **6 specialized cognitive agents** interacting via a structured event mesh:
+The autonomous subsystem (`agent_orchestrator.py`) decomposes academic governance into **6 specialized cognitive agents** interacting via a structured event bus:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Ingestion as Agent-01: Ingestion Gatekeeper
+    participant Predictor as Agent-02: Risk & ML Predictor
+    participant Strategist as Agent-03: Pedagogical Strategist
+    participant Auditor as Agent-05: Ethics & Governance Auditor
+    participant Dispatcher as Agent-04: Multi-Channel Dispatcher
+    participant Ledger as Cryptographic Audit Ledger
+    participant MetaLearner as Agent-06: Meta-Learning Agent
+
+    Ingestion->>Predictor: Publish: student.marks.validated (Feature Vector)
+    Predictor->>Predictor: Run Dual Random Forest Ensembles (97.4% & 99.0%)
+    Predictor->>Predictor: Compute UGC 75% Shortage Classes Needed
+    Predictor->>Strategist: Publish: student.risk.classified (Risk Tier + Root Drivers)
+    Strategist->>Strategist: Mask PII -> Query Gemini for Remedial Action Plan -> De-anonymize
+    Strategist->>Auditor: Submit: intervention.proposal.review
+    Auditor->>Auditor: Validate UGC Guidelines & Demographic Parity
+    Auditor->>Ledger: Record & Seal Block (HMAC-SHA256 Hash Chain)
+    Auditor->>Dispatcher: Approve: intervention.authorized
+    Dispatcher->>Dispatcher: Check Sliding-Window Rate Limit (< 2 alerts/day)
+    Dispatcher->>Dispatcher: Route to WhatsApp, Email, SMS & Student ERP Portal
+    Dispatcher->>MetaLearner: Publish: intervention.dispatched (Log Baseline)
+    MetaLearner->>MetaLearner: Track IEI Score & Monitor Population Drift
+```
 
 | Agent Identifier | Role / Persona | Core Responsibilities | Autonomy Level |
 | :--- | :--- | :--- | :--- |
@@ -121,6 +153,16 @@ The autonomous subsystem (`agent_orchestrator.py`) decomposes academic decision-
 ## 🔒 4. Enterprise Security & Governance Mechanisms
 
 The system integrates a dedicated defense-in-depth security engine (`security_engine.py`):
+
+```mermaid
+graph TD
+    subgraph Hash_Chain ["Cryptographic Hash Chaining Mechanism"]
+        B0[Genesis Block: H0 = 0...0] --> B1["Block #1: H1 = HMAC(Secret, H0 + T1 + Actor + Action + P1)"]
+        B1 --> B2["Block #2: H2 = HMAC(Secret, H1 + T2 + Actor + Action + P2)"]
+        B2 --> B3["Block #3: H3 = HMAC(Secret, H2 + T3 + Actor + Action + P3)"]
+        B3 -.-> BN["Block #N: HN = HMAC(Secret, HN-1 + TN + Actor + Action + PN)"]
+    end
+```
 
 1. **Cryptographic Audit Ledger (HMAC-SHA256 Chained Blocks):**
    * Every grade entry, attendance override, prediction, and dispatch is sealed into an append-only hash chain:
@@ -140,7 +182,28 @@ The system integrates a dedicated defense-in-depth security engine (`security_en
 
 ---
 
-## 🧱 5. Data Structures Implemented
+## 📐 5. Mathematical Formulations & Academic Metrics
+
+### A. Continuous Internal Evaluation (CIE) 60/40 Formulation
+The total score for each course is governed by:
+$$\text{Total Score (100)} = \underbrace{\text{Mid-Term (30)} + \text{Assignment (10)} + \text{Quiz (10)} + \text{Viva (10)}}_{\text{Continuous Internal Evaluation (CIE) — 60 Marks}} + \underbrace{\text{External Exam (40)}}_{\text{Summative SEE}}$$
+
+### B. Statutory Attendance Shortage & Recovery Trajectory (UGC 75% Rule)
+Given total conducted classes $T$ and attended classes $x$, the current attendance percentage is:
+$$\text{Attendance \%} = \left(\frac{x}{T}\right) \times 100$$
+If $\text{Attendance \%} < 75\%$, the student is flagged for statutory shortage. The minimum number of consecutive future lectures $r$ the student must attend without absence to surpass $75\%$ is:
+$$\frac{x + r}{T + r} \ge 0.75 \implies x + r \ge 0.75 \cdot T + 0.75 \cdot r \implies 0.25 \cdot r \ge 0.75 \cdot T - x$$
+$$r = \max\left(1, \left\lceil \frac{0.75 \cdot T - x}{0.25} \right\rceil\right)$$
+
+### C. Intervention Effectiveness Index (IEI)
+Used by `Agent-06 (Meta-Learning Agent)` to evaluate whether an intervention rescued a student:
+$$\text{IEI} = \frac{\Delta \text{CIE Marks} + 0.5 \cdot (\Delta \text{Attendance \%})}{\max(0.1, P_{\text{initial\_risk}})}$$
+* $\text{IEI} \ge 0.75$: Highly Effective Strategy (stored in gold-standard vector memory).
+* $\text{IEI} < 0.20$: Sub-optimal Strategy (triggers prompt revision and feature re-weighting).
+
+---
+
+## 🧱 6. Data Structures Implemented
 
 ```mermaid
 graph LR
@@ -169,7 +232,7 @@ graph LR
 
 ---
 
-## 🛠️ 6. Comprehensive Tools, Frameworks & Technology Stack
+## 🛠️ 7. Comprehensive Tools, Frameworks & Technology Stack
 
 | Category | Tool / Library | Version / Runtime | Role in the System |
 | :--- | :--- | :--- | :--- |
@@ -194,7 +257,7 @@ graph LR
 
 ---
 
-## 📊 7. Dataset Benchmark Integration
+## 📊 8. Dataset Benchmark Integration
 
 | Dataset | Primary Contribution & Synthesized Features |
 | :--- | :--- |
@@ -205,7 +268,7 @@ graph LR
 
 ---
 
-## 📚 8. Accredited Curriculum: Year 1 Semester 1
+## 📚 9. Accredited Curriculum: Year 1 Semester 1
 
 All 500 students belong to **Year 1, Semester 1** across CSE, AIML, and AIDS, enrolled in **8 accredited courses totaling 20.0 Credits**:
 
@@ -223,7 +286,7 @@ All 500 students belong to **Year 1, Semester 1** across CSE, AIML, and AIDS, en
 
 ---
 
-## ⚖️ 9. Continuous Internal Evaluation (CIE) 60/40 Scheme
+## ⚖️ 10. Continuous Internal Evaluation (CIE) 60/40 Scheme
 
 Every course is graded on an institutional **100-mark framework**:
 $$\text{Total Course Score (100)} = \text{Internal CIE (60)} + \text{External SEE (40)}$$
@@ -251,7 +314,7 @@ $$\text{Total Course Score (100)} = \text{Internal CIE (60)} + \text{External SE
 
 ---
 
-## 🤖 10. Machine Learning Models & Evaluation
+## 🤖 11. Machine Learning Models & Evaluation
 
 The machine learning subsystem features dual ensembles trained directly on verified institutional ERP assessments:
 
@@ -275,7 +338,22 @@ The machine learning subsystem features dual ensembles trained directly on verif
 
 ---
 
-## 🏛️ 11. Application Modules & Role-Based Portals
+## ⚖️ 12. System Comparison: Traditional ERP vs. AI Autonomous ERP
+
+| Operational Dimension | Traditional University ERP (SAP / Peoplesoft) | AI-Based Autonomous Academic Decision System |
+| :--- | :--- | :--- |
+| **Intervention Timing** | Post-Facto (After final semester exams) | **Proactive & Continuous** (Weekly early-warning radar) |
+| **Risk Detection** | Static rule threshold (Only flags after failure) | **Dual ML Random Forests** (97.4% performance, 99.0% risk) |
+| **Attendance Action** | Manual notice issued at semester end | **Dynamic Shortfall Calculator** ($r \ge \lceil(0.75T - x)/0.25\rceil$) |
+| **Remedial Guidance** | Generic boilerplate text notices | **Syllabus-Aligned Cognitive Remediation** (Gemini RAG) |
+| **Dispatch Automation** | Manual printing or one-off batch emails | **Multi-Channel Orchestration** (WhatsApp + Email + SMS + ERP) |
+| **Audit & Governance** | Modifiable database logs (Prone to tampering) | **Append-Only HMAC-SHA256 Chained Cryptographic Ledger** |
+| **Data Privacy** | Raw student details transmitted unmasked | **FERPA & DPDP Compliant PII Tokenization Sandbox** |
+| **Decision Adaptation** | Static parameters requiring vendor updates | **Meta-Learning Agent** (IEI tracking and drift alerts) |
+
+---
+
+## 🏛️ 13. Application Modules & Role-Based Portals
 
 ### 1. Student Academic Portal (ICFAI IFHE Aesthetic)
 * **Institutional Top Banner:** IFHE branding, student profile chip, roll number, department, section, and active registration badge.
@@ -311,7 +389,7 @@ The machine learning subsystem features dual ensembles trained directly on verif
 
 ---
 
-## 🗂️ 12. Project Directory Structure
+## 🗂️ 14. Project Directory Structure
 
 ```text
 AI-Academic-Decision-System/
@@ -377,7 +455,7 @@ AI-Academic-Decision-System/
 
 ---
 
-## 📅 13. Project Phases & Implementation Milestones
+## 📅 15. Project Phases & Implementation Milestones
 
 | Week | Phase | Key Activities & Milestones | Status |
 | :--- | :--- | :--- | :--- |
@@ -396,7 +474,7 @@ AI-Academic-Decision-System/
 
 ---
 
-## 🚀 14. Installation & Local Execution
+## 🚀 16. Installation & Local Execution
 
 ### Prerequisites
 * Python 3.10, 3.11, 3.12, 3.13, or 3.14
@@ -426,7 +504,7 @@ Open **[http://localhost:8501](http://localhost:8501)** in your browser.
 
 ---
 
-## 🧪 15. Automated Unit & Security Verification Tests
+## 🧪 17. Automated Unit & Security Verification Tests
 
 The test suite validates the cryptographic ledger, PII tokenizer, prompt guardrails, rate limiting, and full 6-agent cycle execution:
 
@@ -445,7 +523,7 @@ OK
 
 ---
 
-## 🔑 16. Default Login Credentials
+## 🔑 18. Default Login Credentials
 
 | Role | Username / Identifier | Password | Access & Capabilities |
 | :--- | :--- | :--- | :--- |
@@ -457,6 +535,16 @@ OK
 
 ---
 
-## 🌐 17. Live Demo
+## 📖 19. Academic & Research References
+
+1. **Cortez, P., & Silva, A. M. G. (2008).** *Using Data Mining to Predict Secondary School Student Performance.* In Proceedings of 5th Annual Future Business Technology Conference (FUBUTEC 2008), pp. 5–12, Porto, Portugal. [UCI Machine Learning Repository].
+2. **Kuzilek, J., Hlosta, M., & Zdrahal, Z. (2017).** *Open University Learning Analytics Dataset.* Scientific Data, 4(1), 170171. Nature Publishing Group.
+3. **University Grants Commission (UGC), India.** *Statutory Minimum Attendance Regulations for Tertiary Degree Conferment (75% Mandatory Attendance Norm).*
+4. **Digital Personal Data Protection (DPDP) Act, 2023.** *Ministry of Electronics and Information Technology (MeitY), Government of India.*
+5. **Family Educational Rights and Privacy Act (FERPA) (34 CFR Part 99).** *U.S. Department of Education.*
+
+---
+
+## 🌐 20. Live Demo
 
 👉 **[Open AI Academic Decision System](https://ai-academic-decision-system.streamlit.app/)**
