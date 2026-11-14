@@ -1,4 +1,4 @@
-# AI-Based Autonomous Academic Decision System
+# AI-Based Autonomous Academic Decision System.....
 
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/Framework-Streamlit-FF4B4B.svg)](https://streamlit.io/)
